@@ -1,0 +1,27 @@
+# AI tool local config/cache
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/bmad-bmm-orchestrate-dev-story.md
+!.claude/commands/bmad-bmm-orchestrate-create-story.md
+!.claude/commands/bmad-bmm-orchestrate-create-story-codex.md
+!.claude/commands/bmad-bmm-orchestrate-dev-story-batch.md
+!.claude/commands/bmad-bmm-orchestrate-create-story-batch.md
+!.claude/commands/bmad-bmm-orchestrate-full-batch.md
+!.claude/commands/bmad-bmm-orchestrate-dev-epic.md
+.agent/
+.codex/
+.gemini/
+
+bin/
+node_modules/
+dist/
+dist-e2e/
+*.js.map
+.env
+.env.local
+coverage/
+*.tsbuildinfo
+.DS_Store
+.scrow/

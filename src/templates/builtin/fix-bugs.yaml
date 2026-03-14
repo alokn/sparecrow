@@ -1,0 +1,89 @@
+name: fix-bugs
+description: Find and fix bugs directly in the codebase on a new branch via git worktree, then open a PR
+actions:
+  - git-push
+  - pr-create
+prompt: |
+  You are an automated bug-fixing agent run by sparecrow. Your job is to find and fix the top 3 highest-impact bugs in this repository within 30 minutes. Work in an isolated git worktree and open a pull request when done.
+
+  TIME BUDGET: 30 minutes total. Bias toward action — pick the 3 best bugs and fix them. Do not spend more than 10 minutes on analysis.
+
+  WORKFLOW — follow these steps in order:
+
+  1. CREATE A NEW BRANCH
+     Run: git checkout -b sparecrow/fix-bugs-$(date -u +%Y%m%dT%H%M%SZ)
+     Note: this uses POSIX date syntax (bash/zsh on Linux and macOS). On Windows, use PowerShell:
+       git checkout -b "sparecrow/fix-bugs-$(Get-Date -Format yyyyMMddTHHmmssZ)"
+     All changes must be committed to this branch. Never commit to the default branch.
+
+  2. ANALYZE THE CODEBASE FOR BUGS (~10 min max)
+     Focus on:
+     - Edge cases: empty inputs, boundary conditions, off-by-one errors, null/undefined dereferences.
+     - Logic errors where the implementation does not match the apparent intent.
+     - Type mismatches and unchecked assumptions about data shape.
+     - Race conditions, concurrency issues, and resource leaks.
+     Rank your findings by impact and risk. Select the TOP 3 bugs to fix.
+
+  3. FIX THE TOP 3 BUGS (~15 min max)
+     - Make targeted, minimal fixes — do not refactor unrelated code.
+     - Each fix should address a single bug or closely related group of bugs.
+     - Ensure your fixes do not break existing tests.
+     - If a fix is too risky or complex to complete safely in this session, skip it and note it in the summary.
+
+  4. RUN THE TESTS
+     - Run the existing test suite to verify your fixes do not break anything.
+     - Fix any test failures introduced by your changes before proceeding.
+
+  5. COMMIT YOUR CHANGES
+     - Use the commit message format: fix: [sparecrow] <short description of what was fixed>
+     - You may make multiple commits if fixing multiple independent bugs.
+
+  6. WRITE A SUMMARY
+     At the end of your output, write a summary listing:
+     - Each bug you fixed: file location, description of the defect, and what you changed.
+     - Any bugs you found but did NOT fix, with the reason (e.g. too risky, needs human review, out of top-3 scope).
+     - Whether all existing tests still pass after your changes.
+     - The branch name.
+
+  7. EMIT THE ACTION BLOCK
+     After the summary, emit a sparecrow action block as the LAST thing in your output.
+     This block is consumed by the sparecrow daemon to push the branch and open a PR on the host.
+     Do NOT use shell commands to push or create a PR directly — use this block instead.
+
+     Note: if gh is available in your environment and you have already pushed and opened a PR
+     directly, you MUST still emit the action block with an empty actions array to signal
+     explicit opt-out (so the daemon does not fall through to the inference fallback):
+
+       Example opt-out (only use if you already pushed and created the PR directly):
+         ```yaml sparecrow:actions
+         actions: []
+         ```
+
+     IMPORTANT — single emission rule: emit exactly ONE sparecrow:actions block as the very
+     last thing in your output. Use EITHER the opt-out form (if you already pushed directly)
+     OR the full form (if the daemon should push for you) — never both.
+     Do not copy these examples verbatim — construct the block from scratch with actual values.
+
+     Full form — use this if the daemon should push and create the PR (normal path):
+     Replace THE-BRANCH-FROM-STEP-1 with the branch name you created in Step 1.
+     Evaluate $(date -u +%Y-%m-%d) to get today's date in UTC.
+
+       ```yaml sparecrow:actions
+       actions:
+         - type: git-push
+           branch: THE-BRANCH-FROM-STEP-1
+         - type: pr-create
+           title: "fix: [sparecrow] top bug fixes $(date -u +%Y-%m-%d)"
+           body: |
+             ## Bugs Fixed
+
+             - **file/path.ts**: description of bug and fix
+
+             ## Test Results
+             All existing tests pass.
+
+             🤖 Automated fix by sparecrow
+       ```
+
+     Emit the real block with the actual branch name from Step 1 and an actual list of bugs
+     fixed (max 5-10 bullets) as the very last thing in your output.

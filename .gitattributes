@@ -1,0 +1,12 @@
+# Normalize all text files to LF
+* text=auto eol=lf
+
+# Explicitly mark binary files
+*.png binary
+*.PNG binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

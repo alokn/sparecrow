@@ -1,0 +1,41 @@
+# sparecrow E2E clean-room test environment.
+# All host paths are mounted at identical absolute paths inside the container so
+# that sparecrow's docker-run mount args (resolved from the container) are valid
+# when the host Docker daemon interprets them via socket forwarding.
+
+services:
+  sparecrow-e2e:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      args:
+        HOST_UID: ${HOST_UID}
+        HOST_GID: ${HOST_GID}
+        HOST_HOME: ${HOST_HOME}
+    volumes:
+      # Docker socket — task containers run as siblings on the host daemon.
+      - ${DOCKER_SOCKET}:/var/run/docker.sock
+      # Claude OAuth credentials — real credentials, mounted at the host path so
+      # os.homedir()/.claude resolves correctly inside both the test container and
+      # the task containers it spawns.
+      - ${HOST_HOME}/.claude:${HOST_HOME}/.claude
+      # Fake Claude projects dir — shadows ~/.claude/projects/ with a minimal JSONL file
+      # so the JSONL estimate source sees ~0% utilization and the trigger always fires.
+      # The inner mount takes precedence over the parent ~/.claude mount above.
+      # Task containers spawned via Docker socket mount the real host ~/.claude/ directly.
+      - ${FAKE_CLAUDE_PROJECTS_DIR}:${HOST_HOME}/.claude/projects
+      # Ephemeral test repo — created by run.sh at the same path on the host.
+      - ${TEST_REPO_PATH}:${TEST_REPO_PATH}
+      # Claude binary install dir — mounted read-only at the same absolute path
+      # so realpath() inside sparecrow produces a host-resolvable path.
+      - ${CLAUDE_INSTALL_DIR}:${CLAUDE_INSTALL_DIR}:ro
+    environment:
+      - HOME=${HOST_HOME}
+      - TEST_REPO_PATH=${TEST_REPO_PATH}
+      - CLAUDE_REAL_PATH=${CLAUDE_REAL_PATH}
+      - CLAUDE_INSTALL_DIR=${CLAUDE_INSTALL_DIR}
+    # Add the host Docker socket's GID directly so the container user can write
+    # to /var/run/docker.sock regardless of the internal docker group GID.
+    group_add:
+      - "${DOCKER_SOCKET_GID}"
+    user: "${HOST_UID}:${HOST_GID}"
