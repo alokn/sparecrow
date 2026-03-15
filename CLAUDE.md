@@ -104,9 +104,11 @@ npm run typecheck  # tsc --noEmit (type checking without emit)
 ```
 
 **Agent test execution rules:**
-- Always run `CI=true npm test 2>&1 | tail -30` — `CI=true` disables ANSI color codes, making output reliably grep-friendly. The summary is always at the end.
-- To check a specific file: `CI=true npm test -- path/to/file.test.ts 2>&1 | tail -20`
+- Always run `NO_COLOR=1 npm test 2>&1 | tail -30` — `NO_COLOR=1` disables ANSI color codes (vitest v4 ignores `CI=true` for colors), making output reliably grep-friendly. The summary is always at the end.
+- To check a specific file: `NO_COLOR=1 npm test -- path/to/file.test.ts 2>&1 | tail -20`
+- To investigate failures: `NO_COLOR=1 npm test -- path/to/failing.test.ts --reporter=verbose 2>&1 | tail -40`
 - Summary lines always end with: `Test Files: N passed (N)` and `Tests: N passed (N)`
+- **NEVER re-run a test command just to try a different grep/tail pattern.** Capture enough output on the first run (use `tail -30` or `tail -40`). If you need more detail, run only the specific failing file with `--reporter=verbose`, not the full suite again.
 
 Binary entrypoints after build:
 - `sparecrow` → `./dist/index.js`
