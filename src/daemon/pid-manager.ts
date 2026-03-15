@@ -27,6 +27,10 @@ export async function readPid(dataDir: string): Promise<number | null> {
     const content = await readFile(pidPath, 'utf-8');
     const parsed = parseInt(content.trim(), 10);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    void logger.warn('pid-manager.read_pid_invalid', {
+      path: pidPath,
+      reason: content.trim().length === 0 ? 'empty file' : 'non-numeric content',
+    });
     return null;
   } catch {
     return null;

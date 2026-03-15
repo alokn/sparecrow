@@ -465,21 +465,29 @@ export class PollingLoop {
                 // Non-fatal: status write proceeds with null backendState
               }
             }
-            await writeCycleStatus({
-              startedAt,
-              lastPollAt: cycleStart.toISOString(),
-              nextPollAt: pollFailNextPollAt,
-              usage: null,
-              trigger: null,
-              activeTask: null,
-              lastError,
-              lastErrorDetail,
-              lastDispatchAt: null,
-              cycleResult: null,
-              queueDepth,
-              pid: daemonPid,
-              backendState,
-            });
+            try {
+              await writeCycleStatus({
+                startedAt,
+                lastPollAt: cycleStart.toISOString(),
+                nextPollAt: pollFailNextPollAt,
+                usage: null,
+                trigger: null,
+                activeTask: null,
+                lastError,
+                lastErrorDetail,
+                lastDispatchAt: null,
+                cycleResult: null,
+                queueDepth,
+                pid: daemonPid,
+                backendState,
+              });
+            } catch (statusWriteErr) {
+              // Non-fatal: status write failure (e.g. ENOSPC) must not kill the daemon
+              void logger.warn('polling-loop.status-write-failed', {
+                error:
+                  statusWriteErr instanceof Error ? statusWriteErr.message : String(statusWriteErr),
+              });
+            }
 
             // Sleep before next attempt (abortable), compensated for elapsed time
             if (pollFailSleepMs > 0) {
@@ -523,21 +531,29 @@ export class PollingLoop {
                 // Non-fatal: status write proceeds with null backendState
               }
             }
-            await writeCycleStatus({
-              startedAt,
-              lastPollAt: cycleStart.toISOString(),
-              nextPollAt: trigFailNextPollAt,
-              usage: usageState,
-              trigger: null,
-              activeTask: null,
-              lastError,
-              lastErrorDetail,
-              lastDispatchAt: null,
-              cycleResult: null,
-              queueDepth,
-              pid: daemonPid,
-              backendState,
-            });
+            try {
+              await writeCycleStatus({
+                startedAt,
+                lastPollAt: cycleStart.toISOString(),
+                nextPollAt: trigFailNextPollAt,
+                usage: usageState,
+                trigger: null,
+                activeTask: null,
+                lastError,
+                lastErrorDetail,
+                lastDispatchAt: null,
+                cycleResult: null,
+                queueDepth,
+                pid: daemonPid,
+                backendState,
+              });
+            } catch (statusWriteErr) {
+              // Non-fatal: status write failure (e.g. ENOSPC) must not kill the daemon
+              void logger.warn('polling-loop.status-write-failed', {
+                error:
+                  statusWriteErr instanceof Error ? statusWriteErr.message : String(statusWriteErr),
+              });
+            }
 
             triggerEngine.resetDispatchState();
 
@@ -611,21 +627,29 @@ export class PollingLoop {
               intervalMs,
             );
             const queueDepth = await getQueueDepth();
-            await writeCycleStatus({
-              startedAt,
-              lastPollAt: cycleStart.toISOString(),
-              nextPollAt: bsSkipNextPollAt,
-              usage: usageState,
-              trigger: triggerState,
-              activeTask: null,
-              lastError,
-              lastErrorDetail,
-              lastDispatchAt: null,
-              cycleResult: null,
-              queueDepth,
-              pid: daemonPid,
-              backendState,
-            });
+            try {
+              await writeCycleStatus({
+                startedAt,
+                lastPollAt: cycleStart.toISOString(),
+                nextPollAt: bsSkipNextPollAt,
+                usage: usageState,
+                trigger: triggerState,
+                activeTask: null,
+                lastError,
+                lastErrorDetail,
+                lastDispatchAt: null,
+                cycleResult: null,
+                queueDepth,
+                pid: daemonPid,
+                backendState,
+              });
+            } catch (statusWriteErr) {
+              // Non-fatal: status write failure (e.g. ENOSPC) must not kill the daemon
+              void logger.warn('polling-loop.status-write-failed', {
+                error:
+                  statusWriteErr instanceof Error ? statusWriteErr.message : String(statusWriteErr),
+              });
+            }
             endCycleNextPollAt = bsSkipNextPollAt;
             compensatedSleepMs = bsSkipSleepMs;
             this._lastPollAt = cycleStart.toISOString();
@@ -671,21 +695,31 @@ export class PollingLoop {
               currentPartialWriter = writer;
 
               const currentQueueDepth = await getQueueDepth();
-              await writeCycleStatus({
-                startedAt,
-                lastPollAt: cycleStart.toISOString(),
-                nextPollAt: computeMidCycleNextPollAt(intervalMs),
-                usage: usageState,
-                trigger: triggerState,
-                activeTask: activeTaskState,
-                lastError,
-                lastErrorDetail,
-                lastDispatchAt,
-                cycleResult,
-                queueDepth: currentQueueDepth,
-                pid: daemonPid,
-                backendState,
-              });
+              try {
+                await writeCycleStatus({
+                  startedAt,
+                  lastPollAt: cycleStart.toISOString(),
+                  nextPollAt: computeMidCycleNextPollAt(intervalMs),
+                  usage: usageState,
+                  trigger: triggerState,
+                  activeTask: activeTaskState,
+                  lastError,
+                  lastErrorDetail,
+                  lastDispatchAt,
+                  cycleResult,
+                  queueDepth: currentQueueDepth,
+                  pid: daemonPid,
+                  backendState,
+                });
+              } catch (statusWriteErr) {
+                // Non-fatal: status write failure (e.g. ENOSPC) must not kill the daemon
+                void logger.warn('polling-loop.status-write-failed', {
+                  error:
+                    statusWriteErr instanceof Error
+                      ? statusWriteErr.message
+                      : String(statusWriteErr),
+                });
+              }
             };
 
             const onTaskComplete = async (
@@ -762,21 +796,31 @@ export class PollingLoop {
                 durationMs: new Date(now).getTime() - new Date(dispatchStartedAt).getTime(),
               };
               const currentQueueDepth = await getQueueDepth();
-              await writeCycleStatus({
-                startedAt,
-                lastPollAt: cycleStart.toISOString(),
-                nextPollAt: computeMidCycleNextPollAt(intervalMs),
-                usage: usageState,
-                trigger: triggerState,
-                activeTask: null,
-                lastError,
-                lastErrorDetail,
-                lastDispatchAt: now,
-                cycleResult: partialCycleResult,
-                queueDepth: currentQueueDepth,
-                pid: daemonPid,
-                backendState,
-              });
+              try {
+                await writeCycleStatus({
+                  startedAt,
+                  lastPollAt: cycleStart.toISOString(),
+                  nextPollAt: computeMidCycleNextPollAt(intervalMs),
+                  usage: usageState,
+                  trigger: triggerState,
+                  activeTask: null,
+                  lastError,
+                  lastErrorDetail,
+                  lastDispatchAt: now,
+                  cycleResult: partialCycleResult,
+                  queueDepth: currentQueueDepth,
+                  pid: daemonPid,
+                  backendState,
+                });
+              } catch (statusWriteErr) {
+                // Non-fatal: status write failure (e.g. ENOSPC) must not kill the daemon
+                void logger.warn('polling-loop.status-write-failed', {
+                  error:
+                    statusWriteErr instanceof Error
+                      ? statusWriteErr.message
+                      : String(statusWriteErr),
+                });
+              }
             };
 
             // onChunk: forward each chunk to the current task's partial output writer.
@@ -841,21 +885,29 @@ export class PollingLoop {
           ));
           const queueDepth = await getQueueDepth();
           const cycleLastPollAt = cycleStart.toISOString();
-          await writeCycleStatus({
-            startedAt,
-            lastPollAt: cycleLastPollAt,
-            nextPollAt: endCycleNextPollAt,
-            usage: usageState,
-            trigger: triggerState,
-            activeTask: activeTaskState,
-            lastError,
-            lastErrorDetail,
-            lastDispatchAt,
-            cycleResult,
-            queueDepth,
-            pid: daemonPid,
-            backendState,
-          });
+          try {
+            await writeCycleStatus({
+              startedAt,
+              lastPollAt: cycleLastPollAt,
+              nextPollAt: endCycleNextPollAt,
+              usage: usageState,
+              trigger: triggerState,
+              activeTask: activeTaskState,
+              lastError,
+              lastErrorDetail,
+              lastDispatchAt,
+              cycleResult,
+              queueDepth,
+              pid: daemonPid,
+              backendState,
+            });
+          } catch (statusWriteErr) {
+            // Non-fatal: status write failure (e.g. ENOSPC) must not kill the daemon
+            void logger.warn('polling-loop.status-write-failed', {
+              error:
+                statusWriteErr instanceof Error ? statusWriteErr.message : String(statusWriteErr),
+            });
+          }
           // Update the observable lastPollAt for the runner to read on loop exit.
           this._lastPollAt = cycleLastPollAt;
 
