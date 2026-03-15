@@ -104,11 +104,16 @@ npm run typecheck  # tsc --noEmit (type checking without emit)
 ```
 
 **Agent test execution rules:**
-- Always run `NO_COLOR=1 npm test 2>&1 | tail -30` — `NO_COLOR=1` disables ANSI color codes (vitest v4 ignores `CI=true` for colors), making output reliably grep-friendly. The summary is always at the end.
+- **Full suite — save output for multi-pass analysis** (`NO_COLOR=1` disables ANSI codes; vitest v4 ignores `CI=true`):
+  ```bash
+  NO_COLOR=1 npm test 2>&1 > /tmp/scrow-test-out; tail -40 /tmp/scrow-test-out
+  ```
+  Keep `/tmp/scrow-test-out` until all analysis is complete — grep it freely without re-running. Remove when done: `rm /tmp/scrow-test-out`
+- **Investigate without re-running:** `grep -E "FAIL|Error" /tmp/scrow-test-out`
+- **Re-run legitimately after fixes** (overwrites saved output): `NO_COLOR=1 npm test 2>&1 > /tmp/scrow-test-out; tail -40 /tmp/scrow-test-out`
 - To check a specific file: `NO_COLOR=1 npm test -- path/to/file.test.ts 2>&1 | tail -20`
-- To investigate failures: `NO_COLOR=1 npm test -- path/to/failing.test.ts --reporter=verbose 2>&1 | tail -40`
 - Summary lines always end with: `Test Files: N passed (N)` and `Tests: N passed (N)`
-- **NEVER re-run a test command just to try a different grep/tail pattern.** Capture enough output on the first run (use `tail -30` or `tail -40`). If you need more detail, run only the specific failing file with `--reporter=verbose`, not the full suite again.
+- **NEVER re-run just to try a different grep pattern** — grep the saved file instead.
 
 Binary entrypoints after build:
 - `sparecrow` → `./dist/index.js`
