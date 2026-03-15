@@ -814,6 +814,13 @@ describe('ClaudeCodeAuthManager', () => {
   it('skips permission check on WSL-mounted credential paths', async () => {
     vi.resetModules();
 
+    // WSL is by definition a Linux environment — stub only process.platform so
+    // that shouldSkipPermissionCheck() works on macOS CI too. Spreading the live
+    // `process` object is unsafe (loses non-enumerable props and live getters),
+    // so we use Object.defineProperty to patch only the single property we need.
+    const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
     const fsWslMock = {
       access: vi.fn().mockResolvedValue(undefined),
       stat: vi.fn().mockResolvedValue({ mode: 0o100644 }),
@@ -837,16 +844,26 @@ describe('ClaudeCodeAuthManager', () => {
       VERSION: 'test',
     }));
 
-    const { ClaudeCodeAuthManager: WslAuthManager } = await import('./auth-manager.js');
-    const wslAuthManager = new WslAuthManager();
+    try {
+      const { ClaudeCodeAuthManager: WslAuthManager } = await import('./auth-manager.js');
+      const wslAuthManager = new WslAuthManager();
 
-    await wslAuthManager.getToken();
+      await wslAuthManager.getToken();
 
-    expect(fsWslMock.stat).not.toHaveBeenCalled();
-    expect(loggerWslMock.warn).not.toHaveBeenCalledWith(
-      'AUTH_CREDENTIALS_PERMISSIONS_OPEN',
-      expect.anything(),
-    );
+      expect(fsWslMock.stat).not.toHaveBeenCalled();
+      expect(loggerWslMock.warn).not.toHaveBeenCalledWith(
+        'AUTH_CREDENTIALS_PERMISSIONS_OPEN',
+        expect.anything(),
+      );
+    } finally {
+      // Restore process.platform and clear module registry so doMock leaks
+      // don't propagate into the next describe block.
+      // originalDescriptor is always defined for the built-in process.platform property.
+      if (originalDescriptor !== undefined) {
+        Object.defineProperty(process, 'platform', originalDescriptor);
+      }
+      vi.resetModules();
+    }
   });
 });
 

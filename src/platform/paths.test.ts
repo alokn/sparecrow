@@ -15,8 +15,23 @@ describe('getPaths()', () => {
 
   it('returns config path using XDG_CONFIG_HOME when set', async () => {
     const customConfig = join(tmpdir(), `sparecrow-test-cfg-${Date.now()}`);
+    const customState = join(tmpdir(), `sparecrow-test-state-${Date.now()}`);
+
     vi.stubEnv('XDG_CONFIG_HOME', customConfig);
-    vi.stubEnv('XDG_STATE_HOME', '');
+    vi.stubEnv('XDG_STATE_HOME', customState);
+
+    // Mock env-paths to read XDG env vars — env-paths ignores them on macOS by
+    // design, so we simulate the Linux behaviour by reading them from process.env.
+    // This validates that getPaths() correctly wires up whatever env-paths returns.
+    vi.doMock('env-paths', () => ({
+      default: () => ({
+        config: join(process.env['XDG_CONFIG_HOME'] ?? customConfig, 'sparecrow'),
+        log: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+        data: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+        cache: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+        temp: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+      }),
+    }));
 
     const { getPaths } = await import('./paths.js');
     const paths = getPaths();
@@ -24,9 +39,24 @@ describe('getPaths()', () => {
   });
 
   it('returns data path using XDG_STATE_HOME when set', async () => {
+    const customConfig = join(tmpdir(), `sparecrow-test-cfg-${Date.now()}`);
     const customState = join(tmpdir(), `sparecrow-test-state-${Date.now()}`);
+
+    vi.stubEnv('XDG_CONFIG_HOME', customConfig);
     vi.stubEnv('XDG_STATE_HOME', customState);
-    vi.stubEnv('XDG_CONFIG_HOME', '');
+
+    // Mock env-paths to read XDG env vars — env-paths ignores them on macOS by
+    // design, so we simulate the Linux behaviour by reading them from process.env.
+    // This validates that getPaths() correctly wires up whatever env-paths returns.
+    vi.doMock('env-paths', () => ({
+      default: () => ({
+        config: join(process.env['XDG_CONFIG_HOME'] ?? customConfig, 'sparecrow'),
+        log: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+        data: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+        cache: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+        temp: join(process.env['XDG_STATE_HOME'] ?? customState, 'sparecrow'),
+      }),
+    }));
 
     const { getPaths } = await import('./paths.js');
     const paths = getPaths();
@@ -63,8 +93,18 @@ describe('ensureDirectories()', () => {
     testStateHome = join(tmpdir(), `sparecrow-test-state-${Date.now()}`);
     testConfigHome = join(tmpdir(), `sparecrow-test-cfg-${Date.now()}`);
     vi.resetModules();
-    vi.stubEnv('XDG_STATE_HOME', testStateHome);
-    vi.stubEnv('XDG_CONFIG_HOME', testConfigHome);
+
+    // Mock env-paths to return paths based on the custom dirs,
+    // since env-paths ignores XDG vars on macOS by design.
+    vi.doMock('env-paths', () => ({
+      default: () => ({
+        config: join(testConfigHome, 'sparecrow'),
+        log: join(testStateHome, 'sparecrow'),
+        data: join(testStateHome, 'sparecrow'),
+        cache: join(testStateHome, 'sparecrow'),
+        temp: join(testStateHome, 'sparecrow'),
+      }),
+    }));
   });
 
   afterEach(async () => {

@@ -27,15 +27,44 @@ describe('createConfigWatcher', () => {
     }
     watchers = [];
     await rm(tmpDir, { recursive: true, force: true });
+    // Clear module registry so any vi.doMock() calls inside individual tests
+    // (e.g. the debounce test) do not leak into subsequent tests.
+    vi.resetModules();
   });
 
   it('calls onReload after 300ms debounce when file changes', async () => {
-    const onReload = vi.fn().mockResolvedValue(undefined);
-    const watcher = createConfigWatcher(configPath, onReload);
-    watchers.push(watcher);
+    // Mock fs.watch to control callback delivery — real OS filesystem events
+    // (FSEvents/kqueue on macOS) do not interact with Vitest fake timers.
+    const { EventEmitter } = await import('node:events');
+    const fakeWatcher = new EventEmitter() as ReturnType<typeof import('node:fs').watch>;
+    (fakeWatcher as unknown as { close: () => void }).close = vi.fn();
 
-    // Simulate a change to the config file
-    await writeFile(configPath, 'polling_interval: 60', 'utf-8');
+    // Capture the listener callback passed to watch(dir, opts, callback)
+    let watchCallback: ((eventType: string, filename: string | null) => void) | undefined;
+
+    vi.resetModules();
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.doMock('node:fs', () => ({
+      ...actual,
+      watch: vi.fn(
+        (
+          _dir: string,
+          _opts: Record<string, unknown>,
+          cb: (eventType: string, filename: string | null) => void,
+        ) => {
+          watchCallback = cb;
+          return fakeWatcher;
+        },
+      ),
+    }));
+
+    const { createConfigWatcher: create } = await import('./watcher.js');
+    const onReload = vi.fn().mockResolvedValue(undefined);
+    const w = create(configPath, onReload);
+    watchers.push(w);
+
+    // Manually invoke the watch callback to simulate a file change event
+    watchCallback!('change', 'config.yaml');
 
     // Should not have been called yet (debounce)
     await vi.advanceTimersByTimeAsync(100);
@@ -47,21 +76,44 @@ describe('createConfigWatcher', () => {
   });
 
   it('collapses rapid duplicate events to one reload per debounce window', async () => {
+    // Mock fs.watch to control event delivery — real OS filesystem events
+    // (FSEvents/kqueue on macOS) do not interact with Vitest fake timers.
+    const { EventEmitter } = await import('node:events');
+    const fakeWatcher = new EventEmitter() as ReturnType<typeof import('node:fs').watch>;
+    (fakeWatcher as unknown as { close: () => void }).close = vi.fn();
+
+    let watchCallback: ((eventType: string, filename: string | null) => void) | undefined;
+
+    vi.resetModules();
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.doMock('node:fs', () => ({
+      ...actual,
+      watch: vi.fn(
+        (
+          _dir: string,
+          _opts: Record<string, unknown>,
+          cb: (eventType: string, filename: string | null) => void,
+        ) => {
+          watchCallback = cb;
+          return fakeWatcher;
+        },
+      ),
+    }));
+
+    const { createConfigWatcher: create } = await import('./watcher.js');
     const onReload = vi.fn().mockResolvedValue(undefined);
-    const watcher = createConfigWatcher(configPath, onReload);
-    watchers.push(watcher);
+    const w = create(configPath, onReload);
+    watchers.push(w);
 
-    // Simulate multiple rapid writes
-    await writeFile(configPath, 'v1', 'utf-8');
-    await writeFile(configPath, 'v2', 'utf-8');
-    await writeFile(configPath, 'v3', 'utf-8');
+    // Fire three rapid change events within the same debounce window
+    watchCallback!('change', 'config.yaml');
+    watchCallback!('change', 'config.yaml');
+    watchCallback!('change', 'config.yaml');
 
-    // Advance past debounce
+    // Advance past debounce — debounce should collapse all three into one reload
     await vi.advanceTimersByTimeAsync(400);
 
-    // Should only be called once (or at most a few times based on fs.watch behavior)
-    // The key property is: not called once per write
-    expect(onReload.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(onReload).toHaveBeenCalledTimes(1);
   });
 
   it('close() stops watcher and prevents further reload calls', async () => {

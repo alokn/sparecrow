@@ -201,16 +201,18 @@ describe('spawnWithGuardrails', () => {
   }, 15000);
 
   it('passes cwd to child process', async () => {
+    const { realpathSync } = await import('node:fs');
+    const resolvedTmp = realpathSync('/tmp');
     const { spawnWithGuardrails } = await import('./process.js');
     const result = await spawnWithGuardrails(
       'node',
       ['-e', 'process.stdout.write(process.cwd())'],
       {
-        cwd: '/tmp',
+        cwd: resolvedTmp,
         timeoutMs: 5000,
       },
     );
-    expect(result.stdout).toBe('/tmp');
+    expect(result.stdout).toBe(resolvedTmp);
   });
 
   it('sets enoent=true and resolves when binary does not exist', async () => {

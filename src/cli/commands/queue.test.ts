@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { Command } from 'commander';
@@ -147,24 +148,38 @@ describe('registerQueue() — human mode (non-interactive)', () => {
   });
 
   it('queue list shows table after adding a task', async () => {
-    const store = new QueueStore(dataDir);
-    const mgr = new QueueManager(store);
-    await mgr.add({
-      type: 'template',
-      templateName: 'improve-code',
-      prompt: '',
-      targetPath: dataDir,
-    });
+    // Use a short fixed path as the task targetPath so the full path always fits
+    // in the table column without truncation on both Linux and macOS (where
+    // /tmp resolves to /private/tmp, making random tmpdir paths very long).
+    // mkdir first so realpathSync can resolve symlinks (e.g. /tmp → /private/tmp).
+    const targetDirRaw = join(tmpdir(), 'scr-q-tgt');
+    await mkdir(targetDirRaw, { recursive: true });
+    const targetDir = realpathSync(targetDirRaw);
+    await gitInit(targetDir);
 
-    const { registerQueue } = await import('./queue.js');
-    const program = makeProgram();
-    registerQueue(program);
-    await program.parseAsync(['node', 'sparecrow', 'queue']);
-    expect(stdoutOutput).toContain('improve-code');
-    expect(stdoutOutput).toContain(dataDir);
-    // AC1/AC2: Status column header is present and pending status is shown
-    expect(stdoutOutput).toContain('Status');
-    expect(stdoutOutput).toContain('pending');
+    try {
+      const store = new QueueStore(dataDir);
+      const mgr = new QueueManager(store);
+      await mgr.add({
+        type: 'template',
+        templateName: 'improve-code',
+        prompt: '',
+        targetPath: targetDir,
+      });
+
+      const { registerQueue } = await import('./queue.js');
+      const program = makeProgram();
+      registerQueue(program);
+      await program.parseAsync(['node', 'sparecrow', 'queue']);
+      expect(stdoutOutput).toContain('improve-code');
+      // Assert the full targetPath — the short fixed path is never truncated in table output.
+      expect(stdoutOutput).toContain(targetDir);
+      // AC1/AC2: Status column header is present and pending status is shown
+      expect(stdoutOutput).toContain('Status');
+      expect(stdoutOutput).toContain('pending');
+    } finally {
+      await rm(targetDir, { recursive: true, force: true });
+    }
   });
 
   it('queue list hides failed tasks from live view and shows footer', async () => {
