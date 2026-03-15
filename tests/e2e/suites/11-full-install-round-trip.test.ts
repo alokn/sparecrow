@@ -109,7 +109,7 @@ describe('full install round-trip smoke regression (suite 11)', () => {
     expect(r1.stdout).toMatch(/\d+\.\d+\.\d+/);
 
     // ── Step 2: sparecrow doctor (pre-onboard) ───────────────────────────
-    const r2 = runCli(['doctor'], buildEnv(homeDir));
+    const r2 = runCli(['doctor'], buildEnv(homeDir), 90_000);
     expect([0, 1]).toContain(r2.exitCode);
     expect(r2.stdout.length).toBeGreaterThan(0);
 
@@ -151,7 +151,7 @@ describe('full install round-trip smoke regression (suite 11)', () => {
     expect(queue.tasks.every((t) => t.status === 'pending')).toBe(true);
 
     // ── Step 4: sparecrow doctor (post-onboard) ──────────────────────────
-    const r4 = runCli(['doctor'], buildEnv(homeDir));
+    const r4 = runCli(['doctor'], buildEnv(homeDir), 90_000);
     expect([0, 1]).toContain(r4.exitCode);
     expect(r4.stdout.length).toBeGreaterThan(0);
 
@@ -234,7 +234,7 @@ describe('full install round-trip smoke regression (suite 11)', () => {
     expect(r17.stdout).toContain('Service uninstalled');
 
     // ── Step 18: sparecrow doctor (post-uninstall) ───────────────────────
-    const r18 = runCli(['doctor'], buildEnv(homeDir));
+    const r18 = runCli(['doctor'], buildEnv(homeDir), 90_000);
     expect([0, 1]).toContain(r18.exitCode);
     expect(r18.stdout.length).toBeGreaterThan(0);
   }, 60000);

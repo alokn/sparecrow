@@ -22,8 +22,15 @@ export interface RunCliResult {
  *
  * @param args - CLI arguments (e.g. `['status', '--json']`)
  * @param envOverrides - Additional environment variables merged on top of defaults
+ * @param timeoutMs - Subprocess timeout in milliseconds (default 15000). Commands that probe
+ *   container runtimes (e.g. `doctor`) may need 90s+ in CI where Docker/Podman are installed
+ *   but slow to respond.
  */
-export function runCli(args: string[], envOverrides?: Record<string, string>): RunCliResult {
+export function runCli(
+  args: string[],
+  envOverrides?: Record<string, string>,
+  timeoutMs = 15000,
+): RunCliResult {
   // Strip XDG_* vars from the inherited environment so that the HOME override
   // in envOverrides fully controls where env-paths resolves config/state paths.
   // On CI machines XDG_CONFIG_HOME / XDG_STATE_HOME may be set globally and
@@ -45,7 +52,7 @@ export function runCli(args: string[], envOverrides?: Record<string, string>): R
       ...envOverrides,
     },
     cwd: PROJECT_ROOT,
-    timeout: 15000,
+    timeout: timeoutMs,
   });
 
   // 3.6 — If spawn itself failed (e.g. ENOENT), throw immediately

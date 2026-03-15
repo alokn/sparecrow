@@ -10,6 +10,13 @@ import { runCli, seedConfig, seedCredentials, claudeShim } from '../helpers/inde
 const NODE_BIN_DIR = dirname(process.execPath);
 
 /**
+ * Doctor probes container runtimes (podman info / docker info) with 30s timeouts each.
+ * In CI, Docker is pre-installed but can be slow to respond. The default 15s runCli timeout
+ * is too short for 13 diagnostic checks including two sequential container probes.
+ */
+const DOCTOR_TIMEOUT_MS = 90_000;
+
+/**
  * Returns env overrides that isolate the spawned binary inside homeDir.
  * Ensures env-paths resolves all app paths inside homeDir in CI.
  * XDG_DATA_HOME is set explicitly so that env-paths ep.data resolves inside
@@ -79,7 +86,7 @@ describe('runDiagnostics', () => {
     await seedCredentials(homeDir!, { accessToken: 'e2e-test-token' });
     await claudeShim(homeDir!, 'ok');
 
-    const result = runCli(['doctor'], withShim(homeDir!));
+    const result = runCli(['doctor'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     // Assert header and summary section are present
     expect(result.stdout).toContain('Doctor — Diagnostic Health Check');
@@ -106,7 +113,7 @@ describe('runDiagnostics', () => {
     await seedCredentials(homeDir!, { accessToken: 'e2e-test-token' });
     await claudeShim(homeDir!, 'ok');
 
-    const result = runCli(['doctor', '--json'], withShim(homeDir!));
+    const result = runCli(['doctor', '--json'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());
@@ -152,7 +159,7 @@ describe('runDiagnostics', () => {
     await seedCredentials(homeDir!, { accessToken: 'e2e-test-token' });
     await claudeShim(homeDir!, 'ok');
 
-    const result = runCli(['doctor', '--verbose'], withShim(homeDir!));
+    const result = runCli(['doctor', '--verbose'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout).toContain('Doctor — Diagnostic Health Check');
     expect(result.stdout).toContain('Summary:');
@@ -173,7 +180,7 @@ describe('runDiagnostics', () => {
     // Do NOT seed credentials
     await claudeShim(homeDir!, 'ok');
 
-    const result = runCli(['doctor'], withShim(homeDir!));
+    const result = runCli(['doctor'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.exitCode).toBe(1);
 
@@ -191,7 +198,7 @@ describe('runDiagnostics', () => {
     // Use auth-fail shim: exits 1 with stderr 'not logged in'
     await claudeShim(homeDir!, 'auth-fail');
 
-    const result = runCli(['doctor', '--json'], withShim(homeDir!));
+    const result = runCli(['doctor', '--json'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());
@@ -209,7 +216,7 @@ describe('runDiagnostics', () => {
   // Task 6 (AC: 5) — Missing config file results in ok (uses defaults)
   it('doctor config-validity is ok when no config file exists', async () => {
     // Do NOT call seedConfig. Do NOT seed credentials. Use fresh homeDir.
-    const result = runCli(['doctor', '--json'], baseEnv(homeDir!));
+    const result = runCli(['doctor', '--json'], baseEnv(homeDir!), DOCTOR_TIMEOUT_MS);
 
     // Guard: assert stdout is non-empty and exit code is expected before parsing
     expect(result.stdout.trim()).not.toBe('');
@@ -229,7 +236,7 @@ describe('runDiagnostics', () => {
     const configPath = await seedConfig(homeDir!);
     await writeFile(configPath, 'polling_interval: notanumber\n');
 
-    const result = runCli(['doctor', '--json'], baseEnv(homeDir!));
+    const result = runCli(['doctor', '--json'], baseEnv(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());
@@ -250,7 +257,7 @@ describe('runDiagnostics', () => {
     await mkdir(stateDir, { recursive: true });
     await writeFile(join(stateDir, 'queue.json'), 'not valid json');
 
-    const result = runCli(['doctor', '--json'], baseEnv(homeDir!));
+    const result = runCli(['doctor', '--json'], baseEnv(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());
@@ -267,7 +274,7 @@ describe('runDiagnostics', () => {
   it('doctor reports service-installation-state as warning in a fresh homeDir', async () => {
     await seedConfig(homeDir!);
 
-    const result = runCli(['doctor', '--json'], baseEnv(homeDir!));
+    const result = runCli(['doctor', '--json'], baseEnv(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());
@@ -286,7 +293,7 @@ describe('runDiagnostics', () => {
     // Do NOT seed credentials
     await claudeShim(homeDir!, 'ok');
 
-    const result = runCli(['doctor', '--json'], withShim(homeDir!));
+    const result = runCli(['doctor', '--json'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.exitCode).toBe(1);
 
@@ -319,7 +326,7 @@ describe('runDiagnostics', () => {
       JSON.stringify({ version: 1, tasks: 'not-an-array' }),
     );
 
-    const result = runCli(['doctor', '--json'], baseEnv(homeDir!));
+    const result = runCli(['doctor', '--json'], baseEnv(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());
@@ -342,7 +349,7 @@ describe('runDiagnostics', () => {
     await mkdir(claudeDir, { recursive: true });
     await writeFile(join(claudeDir, '.credentials.json'), 'not valid json', { mode: 0o600 });
 
-    const result = runCli(['doctor', '--json'], withShim(homeDir!));
+    const result = runCli(['doctor', '--json'], withShim(homeDir!), DOCTOR_TIMEOUT_MS);
 
     expect(result.stdout.trim()).not.toBe('');
     const parsed = JSON.parse(result.stdout.trim());

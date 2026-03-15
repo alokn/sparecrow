@@ -204,7 +204,7 @@ describe('JSON envelope and exit code contracts (suite 10)', () => {
 
   // Task 7 (AC: 6)
   it('doctor --json returns valid envelope with findings and summary', () => {
-    const result = runCli(['--json', 'doctor'], baseEnv(homeDir));
+    const result = runCli(['--json', 'doctor'], baseEnv(homeDir), 90_000);
 
     // Do NOT assert a specific exit code (may be 0 or 1 depending on critical findings)
 

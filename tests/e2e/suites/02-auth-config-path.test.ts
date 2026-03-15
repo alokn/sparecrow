@@ -100,7 +100,7 @@ describe('auth and config path bootstrap', () => {
     await seedConfig(homeDir!);
     await seedCredentials(homeDir!, { accessToken: 'e2e-test-token' });
 
-    const result = runCli(['doctor'], baseEnv(homeDir!));
+    const result = runCli(['doctor'], baseEnv(homeDir!), 90_000);
 
     expect(result.stdout).toContain('Auth Token Validity');
     expect(result.stdout).not.toContain('No Claude Code credentials found.');
@@ -114,7 +114,7 @@ describe('auth and config path bootstrap', () => {
   it('doctor shows auth-token-validity fail when credentials file is absent', async () => {
     await seedConfig(homeDir!);
 
-    const result = runCli(['doctor'], baseEnv(homeDir!));
+    const result = runCli(['doctor'], baseEnv(homeDir!), 90_000);
 
     expect(result.stdout).toContain('Auth Token Validity');
     expect(result.stdout).toContain('No Claude Code credentials found.');
