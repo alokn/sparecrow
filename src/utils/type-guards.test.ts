@@ -59,6 +59,33 @@ describe('isRecord()', () => {
     expect(isRecord(BigInt(9007199254740991))).toBe(false);
   });
 
+  it('returns false for Date', () => {
+    expect(isRecord(new Date())).toBe(false);
+  });
+
+  it('returns false for Map', () => {
+    expect(isRecord(new Map())).toBe(false);
+  });
+
+  it('returns false for Set', () => {
+    expect(isRecord(new Set())).toBe(false);
+  });
+
+  it('returns false for class instances', () => {
+    class Custom {
+      value = 42;
+    }
+    expect(isRecord(new Custom())).toBe(false);
+  });
+
+  it('returns false for RegExp', () => {
+    expect(isRecord(/test/)).toBe(false);
+  });
+
+  it('returns false for Error', () => {
+    expect(isRecord(new Error('test'))).toBe(false);
+  });
+
   it('narrows the type to Record<string, unknown>', () => {
     const value: unknown = { foo: 'bar' };
     if (isRecord(value)) {

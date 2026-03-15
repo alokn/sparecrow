@@ -56,6 +56,11 @@ vi.mock('../platform/index.js', () => ({
   })),
 }));
 
+// Mock summary-writer to allow spying on writeSummaryFile invocation in gating tests.
+vi.mock('./summary-writer.js', () => ({
+  writeSummaryFile: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock node:timers/promises to control sleep behavior
 vi.mock('node:timers/promises', () => ({
   setTimeout: vi.fn().mockResolvedValue(undefined),
@@ -444,7 +449,10 @@ describe('PollingLoop', () => {
     });
 
     const loopDone = loop.start();
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    // Yield to the event loop so the async loop starts before we call stop().
+    // Uses resolved-promise microtask instead of real setTimeout.
+    await Promise.resolve();
+    await Promise.resolve();
 
     const stopDone = loop.stop();
     await Promise.all([loopDone, stopDone]);
@@ -2515,9 +2523,13 @@ describe('PollingLoop — sleep interruption on interval hot-reload (Story 14.2)
     expect(sleepDurations[1]).toBe(40_000);
   });
 
-  it('runs exactly one poll cycle after sleep interruption — no double-poll (AC3)', async () => {
+  it('runs exactly one poll cycle after sleep interruption — no double-poll (AC3, Story 21.1)', async () => {
+    // AC3: When a config reload interrupts the sleep between polls, the loop must fire
+    // exactly one poll on the next cycle — never two. Also asserts that triggerEngine.evaluate
+    // is called once per poll (not duplicated), verifying the full cycle contract.
     const sleepMock = vi.mocked((await import('node:timers/promises')).setTimeout);
     const pollMock = vi.fn().mockResolvedValue(makeSnapshot());
+    const evaluateMock = vi.fn().mockReturnValue(makeTriggerResult(false));
 
     let sleepCallCount = 0;
     let currentConfig = makeConfig({ pollingInterval: 300 });
@@ -2528,7 +2540,7 @@ describe('PollingLoop — sleep interruption on interval hot-reload (Story 14.2)
     const loop = new PollingLoop({
       usageMonitor: { poll: pollMock } as never,
       triggerEngine: {
-        evaluate: vi.fn().mockReturnValue(makeTriggerResult(false)),
+        evaluate: evaluateMock,
         resetDispatchState: vi.fn(),
       } as never,
       dispatchAdapter: adapter,
@@ -2568,6 +2580,8 @@ describe('PollingLoop — sleep interruption on interval hot-reload (Story 14.2)
     expect(pollMock).toHaveBeenCalledTimes(2);
     // Three sleep calls: first (interrupted), second (rescheduled, completes), third (exits loop).
     expect(sleepCallCount).toBe(3);
+    // Exactly 2 evaluate calls — one per poll cycle (no duplicates)
+    expect(evaluateMock).toHaveBeenCalledTimes(2);
   });
 
   it('daemon shutdown still works during rescheduled sleep (AC4)', async () => {
@@ -2844,5 +2858,122 @@ describe('PollingLoop — buildTriggerState new fields (Story 15.6)', () => {
     expect(triggerWritten['isIdleHours']).toBe(false);
     expect(triggerWritten['rateHeadroom']).toBe(true);
     expect(triggerWritten['perModelWaste']).toEqual([{ model: 'sonnet', waste: 0.15 }]);
+  });
+});
+
+describe('PollingLoop — writeSummaryFile gating (Story 21.2)', () => {
+  // Tests verify the real gating branch in polling-loop.ts:
+  //   if (config.lastSummaryEnabled && cycleResult !== null) { await writeSummaryFile(...) }
+  // Uses the actual PollingLoop class — no inline simulation.
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('calls writeSummaryFile when lastSummaryEnabled=true and dispatch cycle returns a result', async () => {
+    const sleepMock = vi.mocked((await import('node:timers/promises')).setTimeout);
+    sleepMock.mockImplementation(async () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+
+    const { writeSummaryFile } = await import('./summary-writer.js');
+    const writeSpy = vi.mocked(writeSummaryFile);
+
+    const cycleResult = makeCycleResult();
+    const triggerResult = makeTriggerResult(true);
+
+    const mockTrigger = {
+      evaluate: vi.fn().mockReturnValue(triggerResult),
+      resetDispatchState: vi.fn(),
+    };
+    const mockMonitor = { poll: vi.fn().mockResolvedValue(makeSnapshot()) };
+    const adapter = makeDispatchAdapter(async () => cycleResult);
+
+    const { PollingLoop } = await import('./polling-loop.js');
+    const loop = new PollingLoop({
+      usageMonitor: mockMonitor as never,
+      triggerEngine: mockTrigger as never,
+      dispatchAdapter: adapter,
+      getConfig: () => makeConfig({ lastSummaryEnabled: true }),
+      startedAt: new Date().toISOString(),
+    });
+    await loop.start();
+
+    expect(writeSpy).toHaveBeenCalledOnce();
+    expect(writeSpy).toHaveBeenCalledWith('/tmp/sparecrow-test', cycleResult.tasksSucceeded);
+  });
+
+  it('does not call writeSummaryFile when lastSummaryEnabled=false even if dispatch cycle returns a result', async () => {
+    const sleepMock = vi.mocked((await import('node:timers/promises')).setTimeout);
+    sleepMock.mockImplementation(async () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+
+    const { writeSummaryFile } = await import('./summary-writer.js');
+    const writeSpy = vi.mocked(writeSummaryFile);
+
+    const cycleResult = makeCycleResult();
+    const triggerResult = makeTriggerResult(true);
+
+    const mockTrigger = {
+      evaluate: vi.fn().mockReturnValue(triggerResult),
+      resetDispatchState: vi.fn(),
+    };
+    const mockMonitor = { poll: vi.fn().mockResolvedValue(makeSnapshot()) };
+    const adapter = makeDispatchAdapter(async () => cycleResult);
+
+    const { PollingLoop } = await import('./polling-loop.js');
+    const loop = new PollingLoop({
+      usageMonitor: mockMonitor as never,
+      triggerEngine: mockTrigger as never,
+      dispatchAdapter: adapter,
+      getConfig: () => makeConfig({ lastSummaryEnabled: false }),
+      startedAt: new Date().toISOString(),
+    });
+    await loop.start();
+
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not call writeSummaryFile when dispatch adapter returns null (no dispatch cycle)', async () => {
+    const sleepMock = vi.mocked((await import('node:timers/promises')).setTimeout);
+    sleepMock.mockImplementation(async () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+
+    const { writeSummaryFile } = await import('./summary-writer.js');
+    const writeSpy = vi.mocked(writeSummaryFile);
+
+    const triggerResult = makeTriggerResult(false);
+
+    const mockTrigger = {
+      evaluate: vi.fn().mockReturnValue(triggerResult),
+      resetDispatchState: vi.fn(),
+    };
+    const mockMonitor = { poll: vi.fn().mockResolvedValue(makeSnapshot()) };
+    // Adapter returns null — no dispatch cycle ran
+    const adapter = makeDispatchAdapter(async () => null);
+
+    const { PollingLoop } = await import('./polling-loop.js');
+    const loop = new PollingLoop({
+      usageMonitor: mockMonitor as never,
+      triggerEngine: mockTrigger as never,
+      dispatchAdapter: adapter,
+      getConfig: () => makeConfig({ lastSummaryEnabled: true }),
+      startedAt: new Date().toISOString(),
+    });
+    await loop.start();
+
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 });

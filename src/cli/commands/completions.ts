@@ -28,12 +28,15 @@ _sparecrow`;
 }
 
 function buildFishCompletion(commands: Array<{ name: string; description: string }>): string {
-  const lines = commands
+  const sparecrowLines = commands
     .map(
       (c) => `complete -c sparecrow -n '__fish_use_subcommand' -a ${c.name} -d '${c.description}'`,
     )
     .join('\n');
-  return `complete -c sparecrow -f\n${lines}`;
+  const scrowLines = commands
+    .map((c) => `complete -c scrow -n '__fish_use_subcommand' -a ${c.name} -d '${c.description}'`)
+    .join('\n');
+  return `complete -c sparecrow -f\ncomplete -c scrow -f\n${sparecrowLines}\n${scrowLines}`;
 }
 
 export function registerCompletions(program: Command): void {

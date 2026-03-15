@@ -374,6 +374,67 @@ describe('registerTask', () => {
     });
   });
 
+  describe('task tail — timeout when final file never appears', () => {
+    it('exits when final file eventually appears (task completed)', async () => {
+      // Test tailWithPolling directly with a very short timeout — final file appears quickly.
+      const { tailWithPolling } = await import('./task.js');
+      const taskId = 'dddddddd-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const partialPath = join(tempDir, `${taskId}.partial.txt`);
+      const finalPath = join(tempDir, `${taskId}.txt`);
+
+      await writeFile(partialPath, 'stuck output\n', 'utf-8');
+
+      // Create final file concurrently so the polling loop exits on the next iteration
+      const createFinalFile = writeFile(finalPath, 'done', 'utf-8');
+      const tailPromise = tailWithPolling(partialPath, finalPath, undefined, 5_000);
+
+      await createFinalFile;
+      await tailPromise;
+
+      const combined = stdoutSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('');
+      expect(combined).toContain('stuck output');
+    });
+
+    it('exits when partial file disappears (task process died)', async () => {
+      // Test tailWithPolling directly — partial file removed, polling exits cleanly.
+      const { tailWithPolling } = await import('./task.js');
+      const taskId = 'eeeeeeee-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const partialPath = join(tempDir, `${taskId}.partial.txt`);
+      const finalPath = join(tempDir, `${taskId}.txt`);
+
+      await writeFile(partialPath, 'some output\n', 'utf-8');
+
+      // Remove partial file concurrently so polling exits on disappearance check
+      const removePartial = rm(partialPath, { force: true });
+      const tailPromise = tailWithPolling(partialPath, finalPath, undefined, 5_000);
+
+      await removePartial;
+      await tailPromise;
+
+      const combined = stdoutSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('');
+      expect(combined).toContain('some output');
+    });
+
+    it('exits with timeout message when final output never appears within timeoutMs', async () => {
+      // AC5: tailWithPolling must not hang forever — timeout mechanism fires.
+      const { tailWithPolling } = await import('./task.js');
+      const taskId = 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const partialPath = join(tempDir, `${taskId}.partial.txt`);
+      const finalPath = join(tempDir, `${taskId}.txt`);
+
+      // Create partial file (task is in-progress) but never create final file.
+      // This ensures the loop does not exit via "partial disappeared" — only timeout fires.
+      await writeFile(partialPath, 'in-progress output\n', 'utf-8');
+
+      // Use a very short timeout; advance Date.now past deadline by awaiting a microtask
+      // so the deadline check fires on the second poll iteration.
+      await tailWithPolling(partialPath, finalPath, undefined, 1);
+
+      const stderrOutput = stderrSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('');
+      expect(stderrOutput).toContain('timed out');
+    });
+  });
+
   describe('task tail — auto-detect active task', () => {
     it('auto-detects the single in-progress task when no ID given', async () => {
       vi.resetModules();

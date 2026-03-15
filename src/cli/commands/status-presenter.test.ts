@@ -228,7 +228,7 @@ describe('usageCardState', () => {
   });
 });
 
-describe('AC3/AC4: Usage Card freshness line (compact view)', () => {
+describe('Usage Card freshness line — compact view (story-15-6 AC3/AC4)', () => {
   const FIXED_NOW = new Date('2026-03-10T10:00:00.000Z').getTime();
 
   beforeEach(() => {
@@ -315,10 +315,12 @@ describe('AC6: renderExplainBlock data freshness sentence', () => {
   const FIXED_NOW = new Date('2026-03-10T10:00:00.000Z').getTime();
 
   beforeEach(() => {
+    setRenderContext({ noColor: true, useUnicode: false, isTTY: false, width: 80 });
     vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
   });
 
   afterEach(() => {
+    resetRenderContext();
     vi.restoreAllMocks();
   });
 
@@ -522,5 +524,172 @@ describe('Backend state rendering in status output', () => {
       runtime: null,
       version: null,
     });
+  });
+});
+
+describe('AC1: --explain flag produces plain-English output via renderStatusOutput', () => {
+  const FIXED_NOW = new Date('2026-03-10T10:00:00.000Z').getTime();
+
+  beforeEach(() => {
+    setRenderContext({ noColor: true, useUnicode: false, isTTY: false, width: 80 });
+    vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    resetRenderContext();
+    vi.restoreAllMocks();
+  });
+
+  it('includes explain block with waste risk explanation when explain=true and wastePotential is set', () => {
+    const snapshot = makeSnapshot({
+      wastePotential: 0.35,
+      weeklyResetsAt: new Date(FIXED_NOW + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      dispatchReason: 'waste potential 35.0% below threshold 50%',
+      lastPolledAt: new Date(FIXED_NOW - 2 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: true });
+    // Explain block must contain human-readable waste risk paragraph
+    expect(output).toContain('Waste Risk: 35%');
+    expect(output).toContain('will expire when the window resets');
+    expect(output).toContain('Dispatch reason:');
+  });
+
+  it('includes explain block with reserve explanation when explain=true and effectiveReserve is set', () => {
+    const snapshot = makeSnapshot({
+      effectiveReserve: 0.2,
+      availableBudget: 0.43,
+      weeklyUtilization: 0.37,
+      lastPolledAt: new Date(FIXED_NOW - 1 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: true });
+    expect(output).toContain('Reserve: 20.0%');
+    expect(output).toContain('reserved for your own work');
+    expect(output).toContain('Available: 43.0%');
+  });
+
+  it('does not include explain block when explain=false', () => {
+    const snapshot = makeSnapshot({
+      wastePotential: 0.35,
+      lastPolledAt: new Date(FIXED_NOW - 2 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).not.toContain('Waste Risk:');
+    expect(output).not.toContain('will expire when the window resets');
+  });
+
+  it('shows idle hours explanation when dispatch active via idle hours and explain=true', () => {
+    const snapshot = makeSnapshot({
+      shouldDispatch: true,
+      isIdleHours: true,
+      idleHoursSchedule: '22:00-06:00 daily',
+      wastePotential: 0.05,
+      effectiveReserve: 0.1,
+      availableBudget: 0.2,
+      lastPolledAt: new Date(FIXED_NOW - 1 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: true });
+    expect(output).toContain('Idle Hours');
+    expect(output).toContain('22:00-06:00 daily');
+    expect(output).toContain('Idle-hours dispatch ignores waste-risk thresholds');
+  });
+
+  it('shows no-capacity message when explain=true but all capacity fields are null', () => {
+    const snapshot = makeSnapshot({
+      sessionUtilization: null,
+      weeklyUtilization: null,
+      wastePotential: null,
+      effectiveReserve: null,
+      availableBudget: null,
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: true });
+    expect(output).toContain('No capacity data available yet');
+  });
+
+  it('includes freshness sentence in explain block when lastPolledAt is set', () => {
+    const lastPolledAt = new Date(FIXED_NOW - 5 * 60_000).toISOString();
+    const snapshot = makeSnapshot({
+      wastePotential: 0.4,
+      lastPolledAt,
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: true });
+    expect(output).toContain('Usage data was last refreshed 5m ago');
+    expect(output).toContain('source: oauth, confidence: high');
+  });
+
+  it('shows capacity data but not dispatch-active explanation when dispatch would not trigger (Below Reserve scenario)', () => {
+    // Capacity data is present but availableBudget is negative (below reserve) → shouldDispatch=false
+    const snapshot = makeSnapshot({
+      shouldDispatch: false,
+      effectiveReserve: 0.3,
+      availableBudget: -0.05,
+      weeklyUtilization: 0.75,
+      wastePotential: 0.2,
+      lastPolledAt: new Date(FIXED_NOW - 1 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: true });
+    // Capacity data is rendered — reserve and available sections appear
+    expect(output).toContain('Reserve: 30.0%');
+    expect(output).toContain('Available: -5.0%');
+    // Dispatch is NOT active — idle hours explanation must be absent
+    expect(output).not.toContain('Idle Hours');
+    expect(output).not.toContain('Idle-hours dispatch ignores waste-risk thresholds');
+  });
+});
+
+describe('AC5/AC6: --detail flag renders expanded usage card', () => {
+  const FIXED_NOW = new Date('2026-03-10T10:00:00.000Z').getTime();
+
+  beforeEach(() => {
+    setRenderContext({ noColor: true, useUnicode: false, isTTY: false, width: 80 });
+    vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    resetRenderContext();
+    vi.restoreAllMocks();
+  });
+
+  it('renders weekly, reserve, waste, and 5h rate bars in --detail mode', () => {
+    const snapshot = makeSnapshot({
+      weeklyUtilization: 0.6,
+      sessionUtilization: 0.4,
+      wastePotential: 0.25,
+      effectiveReserve: 0.15,
+      availableBudget: 0.25,
+      lastPolledAt: new Date(FIXED_NOW - 1 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const output = renderStatusOutput(snapshot, { all: false, detail: true, explain: false });
+    expect(output).toContain('Weekly:');
+    expect(output).toContain('Reserve:');
+    expect(output).toContain('Waste:');
+    expect(output).toContain('5h Rate:');
+    expect(output).toContain('Dispatch:');
+  });
+
+  it('renders dispatch line in --detail mode (hidden in compact)', () => {
+    const snapshot = makeSnapshot({
+      wastePotential: 0.3,
+      shouldDispatch: true,
+      lastPolledAt: new Date(FIXED_NOW - 1 * 60_000).toISOString(),
+      source: 'oauth',
+      confidence: 'high',
+    });
+    const detailOutput = renderStatusOutput(snapshot, { all: false, detail: true, explain: false });
+    expect(detailOutput).toContain('Dispatch:');
+    expect(detailOutput).toContain('[active]');
   });
 });

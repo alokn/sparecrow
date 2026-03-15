@@ -15,6 +15,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 /** Polling interval in ms for the fallback polling tail (when fs.watch is unavailable). */
 const POLL_INTERVAL_MS = 500;
 
+/** Default timeout in ms for tailWithPolling — prevents hanging forever if output never appears. */
+const TAIL_TIMEOUT_MS = 30_000;
+
 /** Creates a fresh QueueManager backed by platform data dir. */
 function makeManager(): QueueManager {
   const store = new QueueStore(getPaths().data);
@@ -89,17 +92,28 @@ async function tailPartialFile(
   await tailWithPolling(partialPath, finalPath, signal);
 }
 
-/** Pure polling fallback for environments where fs.watch is unavailable. */
-async function tailWithPolling(
+/** Pure polling fallback for environments where fs.watch is unavailable.
+ * Exported for unit testing of the timeout path.
+ */
+export async function tailWithPolling(
   partialPath: string,
   finalPath: string,
   signal?: AbortSignal,
+  timeoutMs: number = TAIL_TIMEOUT_MS,
 ): Promise<void> {
   let offset = 0;
   let running = true;
+  const deadline = Date.now() + timeoutMs;
 
   while (running) {
     if (signal?.aborted) break;
+
+    if (Date.now() >= deadline) {
+      process.stderr.write(
+        `sparecrow: task tail timed out after ${timeoutMs}ms — final output never appeared\n`,
+      );
+      break;
+    }
 
     offset = await streamFrom(partialPath, offset);
 

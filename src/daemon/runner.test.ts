@@ -299,8 +299,8 @@ function setupRunDaemonMocks(dataDir: string, overrides: MockOverrides = {}): vo
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         if (attempt === maxRetries || !retryOn(lastError)) throw lastError;
-        // Small delay in default mock (1ms) to keep async ordering realistic
-        await new Promise((r) => setTimeout(r, 1));
+        // Yield to event loop to keep async ordering realistic (no real timer)
+        await Promise.resolve();
       }
     }
     throw lastError!;
@@ -1039,6 +1039,61 @@ describe('runner', () => {
       expect(loadAttempts).toBe(1);
       // Falls back to defaults
       expect(capturedPollingInterval).toBe(300);
+    });
+
+    it('logs config load failure before falling back to defaults (Story 21.1 AC4)', async () => {
+      // AC4: When the config file is temporarily unreadable and all retries are exhausted,
+      // the daemon logs the failure and falls back to defaults. This test verifies both
+      // the logging of the failure and the use of fallback config.
+      vi.resetModules();
+
+      let loadAttempts = 0;
+      let capturedPollingInterval: number | undefined;
+      const stderrWrites: string[] = [];
+
+      setupRunDaemonMocks(dataDir, {
+        useInstantRetry: true,
+        loadConfigFn: async () => {
+          loadAttempts++;
+          // Simulate a transient permission error
+          const fsErr = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
+          fsErr.code = 'EACCES';
+          const wrappedErr = new Error('Failed to read config file');
+          wrappedErr.cause = fsErr;
+          throw wrappedErr;
+        },
+        PollingLoopImpl: class ConfigRetryFallbackPollingLoop {
+          readonly lastPollAt: string | null = null;
+          constructor(deps: { getConfig: () => { pollingInterval: number } }) {
+            capturedPollingInterval = deps.getConfig().pollingInterval;
+          }
+          reload() {}
+          async start() {}
+          async stop() {}
+        } as unknown as new (...args: unknown[]) => {
+          readonly lastPollAt: string | null;
+          reload: () => void;
+          start: () => Promise<void>;
+          stop: () => Promise<void>;
+        },
+      });
+
+      vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+        stderrWrites.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+
+      const { runDaemon } = await import('./runner.js');
+      await runDaemon();
+
+      // retryWithBackoff: 1 initial + 3 retries = 4 attempts total (matches adjacent test pattern)
+      expect(loadAttempts).toBe(4);
+      // Falls back to default config (pollingInterval: 300)
+      expect(capturedPollingInterval).toBe(300);
+      // Failure must be logged with the specific structured event — not any incidental EACCES string
+      const fallbackLog = stderrWrites.find((w) => w.includes('runner.config_fallback_used'));
+      expect(fallbackLog).toBeDefined();
     });
 
     it('writes stopped status and calls process.exit(1) when createProvider throws', async () => {
@@ -3693,6 +3748,77 @@ describe('runner', () => {
       // The error log should include the ScrowError code
       const restartFailLog = stderrWrites.find((w) => w.includes('CONTAINER_RUNTIME_NOT_FOUND'));
       expect(restartFailLog).toBeDefined();
+    });
+
+    it('calls writeUnexpectedExitStatus to preserve cached usage data when polling loop crashes (Story 21.1 AC5)', async () => {
+      // AC5: When an unexpected exit occurs, the daemon must write the cached usage data
+      // to the status file so it is available after restart.
+      // Placed in describe('runDaemon()') for correct discoverability.
+      vi.resetModules();
+
+      let writeUnexpectedExitCalled = false;
+      let capturedLastError: string | undefined;
+      let capturedLastErrorDetail: Record<string, unknown> | undefined;
+
+      // Mock state-writer to capture writeUnexpectedExitStatus call.
+      // Signature matches the real function: (startedAt, lastPollAt, lastError, lastErrorDetail)
+      vi.doMock('./state-writer.js', () => ({
+        writeDaemonStatus: async () => {},
+        writeRunningStatus: async () => {},
+        writeStoppedStatus: async () => {},
+        writeStoppingStatus: async () => {},
+        writeErrorStatus: async () => {},
+        writeRestartingStatus: async () => {},
+        writeRestartCompletedStatus: async () => {},
+        writeCycleStatus: async () => {},
+        readExistingStatus: async () => null,
+        writeDegradedStatus: async () => {},
+        writeUnexpectedExitStatus: async (
+          _startedAt: string,
+          _lastPollAt: string | null,
+          lastError: string,
+          lastErrorDetail: Record<string, unknown>,
+        ) => {
+          writeUnexpectedExitCalled = true;
+          capturedLastError = lastError;
+          capturedLastErrorDetail = lastErrorDetail;
+        },
+        buildLastErrorDetail: (code: string, message: string, recoveryCommand: string | null) => ({
+          code,
+          message,
+          recoveryCommand,
+        }),
+      }));
+
+      setupRunDaemonMocks(dataDir, {
+        PollingLoopImpl: class CrashingPollingLoop {
+          readonly lastPollAt: string | null = '2026-03-10T12:00:00.000Z';
+          reload() {}
+          async start() {
+            // Simulate a fatal loop crash
+            throw new Error('unexpected OOM crash');
+          }
+          async stop() {}
+        } as unknown as new (...args: unknown[]) => {
+          readonly lastPollAt: string | null;
+          reload: () => void;
+          start: () => Promise<void>;
+          stop: () => Promise<void>;
+        },
+      });
+
+      vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+
+      const { runDaemon } = await import('./runner.js');
+      await runDaemon();
+
+      // writeUnexpectedExitStatus must have been called to preserve cached data
+      expect(writeUnexpectedExitCalled).toBe(true);
+      expect(capturedLastError).toContain('unexpected OOM crash');
+      // The 4th argument (lastErrorDetail) must be passed — verifies the full contract
+      expect(capturedLastErrorDetail).toBeDefined();
+      expect(typeof capturedLastErrorDetail!['code']).toBe('string');
+      expect(typeof capturedLastErrorDetail!['message']).toBe('string');
     });
   });
 

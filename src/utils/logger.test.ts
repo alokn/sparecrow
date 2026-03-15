@@ -222,6 +222,43 @@ describe('logger', () => {
     expect(Object.prototype.hasOwnProperty.call(record, 'error')).toBe(true);
   });
 
+  it('writes to a new audit file when the date crosses midnight UTC (Story 21.1 AC1)', async () => {
+    // AC1: When the clock crosses midnight UTC, the next audit record must be written
+    // to the new day's file (audit-YYYY-MM-DD.jsonl), not the previous day's file.
+    // The logger's todayFile() uses `new Date().toISOString().slice(0, 10)` to determine
+    // the filename — so we must call vi.useFakeTimers() first so that `new Date()` inside
+    // the logger source is controlled by the fake clock, then advance it with vi.setSystemTime().
+    vi.useFakeTimers();
+    try {
+      const { appendFile } = await import('node:fs/promises');
+      const writtenPaths: string[] = [];
+      vi.mocked(appendFile).mockImplementation(async (path: unknown) => {
+        writtenPaths.push(String(path));
+      });
+      const { logger, enableFileLogging, setLogDir } = await import('./logger.js');
+      setLogDir('/tmp/sparecrow-logs');
+      enableFileLogging();
+
+      // Write a record "at" 2026-03-14 23:59:59 UTC
+      vi.setSystemTime(new Date('2026-03-14T23:59:59.000Z'));
+      await logger.info('pre-midnight.event', {});
+
+      // Write a record "at" 2026-03-15 00:00:01 UTC
+      vi.setSystemTime(new Date('2026-03-15T00:00:01.000Z'));
+      await logger.info('post-midnight.event', {});
+
+      // Verify the two records were written to different files
+      expect(writtenPaths.length).toBe(2);
+      expect(writtenPaths[0]).toContain('audit-2026-03-14.jsonl');
+      expect(writtenPaths[1]).toContain('audit-2026-03-15.jsonl');
+      // Ensure they are different files
+      expect(writtenPaths[0]).not.toBe(writtenPaths[1]);
+    } finally {
+      // Restore real timers so subsequent tests are not affected
+      vi.useRealTimers();
+    }
+  });
+
   it('calls appendFile with mode 0o600 for audit log files (Story 18.1 AC2)', async () => {
     const { appendFile } = await import('node:fs/promises');
     const { logger, enableFileLogging, setLogDir } = await import('./logger.js');

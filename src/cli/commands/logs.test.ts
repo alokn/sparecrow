@@ -626,6 +626,133 @@ describe('registerLogs', () => {
     });
   });
 
+  describe('AC3: verbose output bounded — truncation guard', () => {
+    it('truncates stdout to last 10KB in verbose mode when output exceeds limit', async () => {
+      // Generate output that is well over the 10KB STDOUT_MAX_BYTES limit
+      // 'line-prefix-' (12B) + 15KB of 'A's + '-end-marker' (11B) = ~15383B total
+      const STDOUT_MAX_BYTES = 10 * 1024; // mirrors logs.ts constant
+      const longStdout = 'line-prefix-' + 'A'.repeat(15 * 1024) + '-end-marker';
+      expect(Buffer.byteLength(longStdout, 'utf-8')).toBeGreaterThan(STDOUT_MAX_BYTES);
+      mockQueryResult = {
+        entries: [makeEntry({ stdout: longStdout })],
+        total: 1,
+        successCount: 1,
+        failureCount: 0,
+        failureSummary: [],
+      };
+      const { registerLogs } = await import('./logs.js');
+      const program = makeProgram();
+      registerLogs(program);
+      await program.parseAsync(['node', 'sparecrow', 'logs', '--verbose']);
+      // The truncation marker must be present
+      expect(stdoutOutput).toContain('[truncated]');
+      // The end of the output should be preserved (last 10KB)
+      expect(stdoutOutput).toContain('-end-marker');
+      // The beginning should be cut — 'line-prefix-' is at the very start of a 15KB+ string
+      // After truncation to last 10KB, the prefix is dropped
+      expect(stdoutOutput).not.toContain('line-prefix-');
+      // Explicit byte-count guard: rendered portion after '[truncated]\n' must be ≤ 10KB
+      const truncatedMarker = '[truncated]\n';
+      const markerIdx = stdoutOutput.indexOf(truncatedMarker);
+      expect(markerIdx).toBeGreaterThanOrEqual(0);
+      const renderedPortion = stdoutOutput.slice(markerIdx + truncatedMarker.length);
+      // Isolate only the truncated stdout text (before any trailing labels/separators)
+      // The rendered portion starts with the last ≤10KB of the original stdout
+      expect(Buffer.byteLength(renderedPortion, 'utf-8')).toBeLessThanOrEqual(
+        STDOUT_MAX_BYTES + 512, // +512 allows for surrounding render decoration
+      );
+    });
+
+    it('does not truncate stdout in verbose mode when output is within 10KB limit', async () => {
+      const shortStdout = 'short-output-content';
+      mockQueryResult = {
+        entries: [makeEntry({ stdout: shortStdout })],
+        total: 1,
+        successCount: 1,
+        failureCount: 0,
+        failureSummary: [],
+      };
+      const { registerLogs } = await import('./logs.js');
+      const program = makeProgram();
+      registerLogs(program);
+      await program.parseAsync(['node', 'sparecrow', 'logs', '--verbose']);
+      expect(stdoutOutput).toContain('short-output-content');
+      expect(stdoutOutput).not.toContain('[truncated]');
+    });
+
+    it('does not render output section when stdout is null', async () => {
+      mockQueryResult = {
+        entries: [makeEntry({ stdout: null })],
+        total: 1,
+        successCount: 1,
+        failureCount: 0,
+        failureSummary: [],
+      };
+      const { registerLogs } = await import('./logs.js');
+      const program = makeProgram();
+      registerLogs(program);
+      await program.parseAsync(['node', 'sparecrow', 'logs', '--verbose']);
+      // Should show entry details but no Output: section
+      expect(stdoutOutput).toContain('security-audit');
+      expect(stdoutOutput).not.toContain('Output:');
+    });
+  });
+
+  describe('AC4: --task --full transcript rendering', () => {
+    it('outputs complete untruncated transcript content via --task --full', async () => {
+      // Even large transcripts should be output in full (no truncation)
+      const largeTranscript = 'START-TRANSCRIPT\n' + 'x'.repeat(30 * 1024) + '\nEND-TRANSCRIPT';
+      mockQueryResult = {
+        entries: [makeEntry({ stdout: largeTranscript })],
+        total: 1,
+        successCount: 1,
+        failureCount: 0,
+        failureSummary: [],
+      };
+      const { registerLogs } = await import('./logs.js');
+      const program = makeProgram();
+      registerLogs(program);
+      await program.parseAsync(['node', 'sparecrow', 'logs', '--task', 'security-audit', '--full']);
+      expect(stdoutOutput).toContain('START-TRANSCRIPT');
+      expect(stdoutOutput).toContain('END-TRANSCRIPT');
+      // Full mode should NOT truncate
+      expect(stdoutOutput).not.toContain('[truncated]');
+      // Should not contain card border formatting
+      expect(stdoutOutput).not.toContain('Task Detail');
+    });
+
+    it('outputs message when entries exist but last entry has null stdout', async () => {
+      mockQueryResult = {
+        entries: [makeEntry({ stdout: null }), makeEntry({ taskName: 'later-run', stdout: null })],
+        total: 2,
+        successCount: 2,
+        failureCount: 0,
+        failureSummary: [],
+      };
+      const { registerLogs } = await import('./logs.js');
+      const program = makeProgram();
+      registerLogs(program);
+      await program.parseAsync(['node', 'sparecrow', 'logs', '--task', 'security-audit', '--full']);
+      expect(stdoutOutput).toContain('No transcript available');
+    });
+
+    it('outputs message when no entries match the task filter', async () => {
+      mockQueryResult = {
+        entries: [],
+        total: 0,
+        successCount: 0,
+        failureCount: 0,
+        failureSummary: [],
+      };
+      const { registerLogs } = await import('./logs.js');
+      const program = makeProgram();
+      registerLogs(program);
+      await program.parseAsync(['node', 'sparecrow', 'logs', '--task', 'nonexistent', '--full']);
+      // Empty state message
+      expect(stdoutOutput).toContain('No execution history found');
+    });
+  });
+
   describe('--task detail card mode', () => {
     it('renders bordered detail card with all available fields', async () => {
       mockQueryResult = {

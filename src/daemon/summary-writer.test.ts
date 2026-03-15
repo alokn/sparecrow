@@ -87,49 +87,55 @@ describe('writeSummaryFile', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stale-file behavior: disabled mode must not mutate existing last-summary.txt (AC10)
+// AC5: last-summary.txt is human-readable text format (not JSON)
 // ---------------------------------------------------------------------------
-describe('polling-loop summary writer gating', () => {
-  it('does not invoke writeSummaryFile when lastSummaryEnabled is false', async () => {
-    // The gating condition in polling-loop.ts line 433:
-    //   if (config.lastSummaryEnabled && cycleResult !== null) { await writeSummaryFile(...) }
-    // When lastSummaryEnabled === false, writeSummaryFile is never invoked.
-    // We verify this by spying on writeSummaryFile and simulating the gating logic.
-    const writeSpy = vi.fn<(dataDir: string, successCount: number) => Promise<void>>();
+describe('writeSummaryFile text format (AC5)', () => {
+  let dataDir: string;
 
-    // Simulate the polling loop gating logic with disabled config
-    const simulateGating = async (lastSummaryEnabled: boolean, dataDir2: string): Promise<void> => {
-      const cycleResult = { tasksSucceeded: 3 };
-      if (lastSummaryEnabled && cycleResult !== null) {
-        await writeSpy(dataDir2, cycleResult.tasksSucceeded);
-      }
-    };
+  beforeEach(async () => {
+    dataDir = makeTempDir();
+    await mkdir(dataDir, { recursive: true });
+  });
 
-    const dataDir2 = makeTempDir();
-    await mkdir(dataDir2, { recursive: true });
-    const staleFilePath = join(dataDir2, 'last-summary.txt');
-    const staleContent = 'stale-content-must-not-change';
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
 
-    try {
-      await writeFile(staleFilePath, staleContent, 'utf-8');
+  it('writes plain text that is NOT valid JSON (AC5)', async () => {
+    await writeSummaryFile(dataDir, 7);
+    const content = await readFile(join(dataDir, 'last-summary.txt'), 'utf-8');
+    // Must not be parseable as JSON — it's human-readable text, not JSON
+    expect(() => JSON.parse(content)).toThrow();
+    // Must be a single line starting with 'sparecrow:'
+    expect(content.startsWith('sparecrow:')).toBe(true);
+    // Must not contain JSON structural characters at the start
+    expect(content).not.toMatch(/^\s*[{[]/);
+  });
 
-      // When disabled (lastSummaryEnabled=false), the spy is never called
-      await simulateGating(false, dataDir2);
-      expect(writeSpy).not.toHaveBeenCalled();
+  it('contains human-readable task count and actionable hint (AC5)', async () => {
+    await writeSummaryFile(dataDir, 12);
+    const content = await readFile(join(dataDir, 'last-summary.txt'), 'utf-8');
+    // Human-readable: includes the count and a guidance message
+    expect(content).toContain('12 tasks completed');
+    expect(content).toContain('Run sparecrow logs for details');
+  });
 
-      // Pre-existing file remains untouched
-      const content = await readFile(staleFilePath, 'utf-8');
-      expect(content).toBe(staleContent);
-
-      // When enabled (lastSummaryEnabled=true), the spy IS called
-      await simulateGating(true, dataDir2);
-      expect(writeSpy).toHaveBeenCalledOnce();
-      expect(writeSpy).toHaveBeenCalledWith(dataDir2, 3);
-    } finally {
-      await rm(dataDir2, { recursive: true, force: true });
-    }
+  it('writes single-line format with no trailing newline (AC5)', async () => {
+    await writeSummaryFile(dataDir, 1);
+    const content = await readFile(join(dataDir, 'last-summary.txt'), 'utf-8');
+    // Single line — explicitly assert no embedded newlines
+    expect(content.includes('\n')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stale-file behavior: disabled mode must not mutate existing last-summary.txt (AC10)
+// ---------------------------------------------------------------------------
+// Polling-loop gating is now tested via the real PollingLoop class in
+// src/daemon/polling-loop.test.ts ('PollingLoop — writeSummaryFile gating (Story 21.2)').
+// Those tests spy on writeSummaryFile through the actual production gating branch:
+//   if (config.lastSummaryEnabled && cycleResult !== null) { await writeSummaryFile(...) }
+// This avoids false confidence from inline simulations that hardcode the same condition.
 
 // ---------------------------------------------------------------------------
 // Output content guardrail — no secrets or credentials (AC12)

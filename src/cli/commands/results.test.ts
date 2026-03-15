@@ -340,6 +340,174 @@ describe('registerResults — human mode', () => {
 
     expect(stdoutOutput).toContain('No results found. Try running a task first.');
   });
+
+  it('renders ACTIONS column in list view table with action outcomes (AC2)', async () => {
+    // Set up audit log to discover repo
+    await writeFile(
+      join(logsDir, 'audit-2026-03-04.jsonl'),
+      makeAuditLine('result.artifact-written', { repoPath: repoDir }) + '\n',
+      'utf-8',
+    );
+
+    // Create result file
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-act1234.md'),
+      makeResultContent({
+        task_id: 'act1234',
+        template: 'improve-code',
+        repo: repoDir,
+        completed_at: '2026-03-04T10:30:00.000Z',
+      }),
+      'utf-8',
+    );
+
+    // Create companion .actions.json file with action results
+    const companion = {
+      task_id: 'act1234',
+      source: 'parsed',
+      actions_requested: 2,
+      actions_executed: 1,
+      actions_failed: 1,
+      actions_skipped: 0,
+      results: [
+        { type: 'git_push', status: 'success', url: null, error: null, reason: null },
+        { type: 'pr_create', status: 'failed', url: null, error: 'auth error', reason: null },
+      ],
+    };
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-act1234.actions.json'),
+      JSON.stringify(companion),
+      'utf-8',
+    );
+
+    const { registerResults } = await import('./results.js');
+    const program = new Command();
+    program.exitOverride();
+    registerResults(program);
+    await program.parseAsync(['node', 'sparecrow', 'results']);
+
+    // The table should contain the ACTIONS column header
+    expect(stdoutOutput).toContain('ACTIONS');
+    // And it should show the formatted action summary: "1 ok / 1 fail"
+    expect(stdoutOutput).toContain('1 ok');
+    expect(stdoutOutput).toContain('1 fail');
+    expect(stdoutOutput).toContain('1 result(s) found');
+  });
+
+  it('renders ACTIONS column as "-" when no companion file exists (AC2)', async () => {
+    await writeFile(
+      join(logsDir, 'audit-2026-03-04.jsonl'),
+      makeAuditLine('result.artifact-written', { repoPath: repoDir }) + '\n',
+      'utf-8',
+    );
+
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-noact1.md'),
+      makeResultContent({
+        task_id: 'noact1',
+        template: 'improve-code',
+        repo: repoDir,
+        completed_at: '2026-03-04T10:30:00.000Z',
+      }),
+      'utf-8',
+    );
+
+    const { registerResults } = await import('./results.js');
+    const program = new Command();
+    program.exitOverride();
+    registerResults(program);
+    await program.parseAsync(['node', 'sparecrow', 'results']);
+
+    // ACTIONS column header must be present
+    expect(stdoutOutput).toContain('ACTIONS');
+    // No companion file → formatActionsColumn returns '-' — must be present in output
+    expect(stdoutOutput).toContain('-');
+    // The table contains the result row ID
+    expect(stdoutOutput).toContain('noact1');
+  });
+
+  it('renders ACTIONS column as "0 ok" when companion has all-zero counters (AC2 boundary)', async () => {
+    // Zero-action companion: ok=0, fail=0, skip=0 — formatActionsColumn returns "0 ok"
+    await writeFile(
+      join(logsDir, 'audit-2026-03-04.jsonl'),
+      makeAuditLine('result.artifact-written', { repoPath: repoDir }) + '\n',
+      'utf-8',
+    );
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-zero1.md'),
+      makeResultContent({
+        task_id: 'zero1',
+        template: 'improve-code',
+        repo: repoDir,
+        completed_at: '2026-03-04T10:30:00.000Z',
+      }),
+      'utf-8',
+    );
+    const companion = {
+      task_id: 'zero1',
+      source: 'parsed',
+      actions_requested: 0,
+      actions_executed: 0,
+      actions_failed: 0,
+      actions_skipped: 0,
+      results: [],
+    };
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-zero1.actions.json'),
+      JSON.stringify(companion),
+      'utf-8',
+    );
+    const { registerResults } = await import('./results.js');
+    const program = new Command();
+    program.exitOverride();
+    registerResults(program);
+    await program.parseAsync(['node', 'sparecrow', 'results']);
+    // All counters zero → formatActionsColumn uses "0 ok" branch (ok=0 with fail=0 && skip=0)
+    expect(stdoutOutput).toContain('ACTIONS');
+    expect(stdoutOutput).toContain('0 ok');
+  });
+
+  it('renders ACTIONS column as "N skip" when companion has only skipped actions (AC2 boundary)', async () => {
+    // Skip-only companion: ok=0, fail=0, skip=3 — formatActionsColumn returns "3 skip"
+    await writeFile(
+      join(logsDir, 'audit-2026-03-04.jsonl'),
+      makeAuditLine('result.artifact-written', { repoPath: repoDir }) + '\n',
+      'utf-8',
+    );
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-skip1.md'),
+      makeResultContent({
+        task_id: 'skip1',
+        template: 'improve-code',
+        repo: repoDir,
+        completed_at: '2026-03-04T10:30:00.000Z',
+      }),
+      'utf-8',
+    );
+    const companion = {
+      task_id: 'skip1',
+      source: 'parsed',
+      actions_requested: 3,
+      actions_executed: 0,
+      actions_failed: 0,
+      actions_skipped: 3,
+      results: [],
+    };
+    await writeFile(
+      join(repoDir, '.scrow', '2026-03-04T10-30-00Z-improve-code-skip1.actions.json'),
+      JSON.stringify(companion),
+      'utf-8',
+    );
+    const { registerResults } = await import('./results.js');
+    const program = new Command();
+    program.exitOverride();
+    registerResults(program);
+    await program.parseAsync(['node', 'sparecrow', 'results']);
+    // ok=0, fail=0, skip=3 → only skip branch fires: "3 skip" (not "0 ok")
+    expect(stdoutOutput).toContain('ACTIONS');
+    expect(stdoutOutput).toContain('3 skip');
+    expect(stdoutOutput).not.toContain('0 ok');
+  });
 });
 
 // ---------------------------------------------------------------------------

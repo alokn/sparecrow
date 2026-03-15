@@ -32,6 +32,25 @@ let loggerDebugSpy: ReturnType<typeof vi.fn>;
 /** Default credential resolver result: no credential files found, just HOME env. */
 const defaultCredentials = { mounts: [], env: { HOME: '/root' } };
 
+/** Registers the standard utils/index.js mock (logger + boundOutput + output byte limits).
+ * Call this after vi.resetModules() and before importing the module under test.
+ * Reuse this helper in any test that needs a fresh module scope but does not need
+ * custom logger behaviour — avoids duplicating the inline mock object literal.
+ */
+function mockStandardUtilsModule(): void {
+  vi.doMock('../../../utils/index.js', () => ({
+    logger: {
+      info: vi.fn().mockResolvedValue(undefined),
+      warn: vi.fn().mockResolvedValue(undefined),
+      error: vi.fn().mockResolvedValue(undefined),
+      debug: vi.fn().mockResolvedValue(undefined),
+    },
+    boundOutput: realBoundOutput,
+    MAX_OUTPUT_BYTES: REAL_MAX_OUTPUT_BYTES,
+    MAX_OUTPUT_BYTES_SUCCESS: REAL_MAX_OUTPUT_BYTES_SUCCESS,
+  }));
+}
+
 /** Real boundOutput implementation for use in mocks -- truncates to last maxBytes UTF-8-safe. */
 function realBoundOutput(raw: string, maxBytes: number = 10 * 1024): string {
   if (Buffer.byteLength(raw, 'utf-8') <= maxBytes) return raw;
@@ -4926,5 +4945,45 @@ describe('ContainerExecutionBackend', () => {
       // Unrelated caller key must be preserved
       expect(runArgs.env).toHaveProperty('SAFE_VAR', 'keep');
     });
+  });
+
+  // Story 21.3 AC6: concurrent available() and execute() do not corrupt each other's state
+  it('handles concurrent available() and execute() without state corruption', async () => {
+    const mockRuntime = createMockRuntime();
+    let resolveDetection: (value: ContainerRuntime) => void;
+    const delayedDetection = new Promise<ContainerRuntime>((resolve) => {
+      resolveDetection = resolve;
+    });
+
+    vi.resetModules();
+    const concurrentDetect = vi.fn().mockReturnValue(delayedDetection);
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: concurrentDetect,
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    // Fire available() and execute() concurrently — both need the runtime
+    const availablePromise = backend.available();
+    const executePromise = backend.execute('claude', ['--print', 'test'], makeOptions());
+
+    // Resolve the detection after both calls are in-flight
+    resolveDetection!(mockRuntime);
+
+    const [availableResult, executeResult] = await Promise.all([availablePromise, executePromise]);
+
+    // Both should succeed without corruption
+    expect(availableResult).toBe(true);
+    expect(executeResult.exitCode).toBe(0);
+    // Runtime detection should only be called once (cached promise shared)
+    expect(concurrentDetect).toHaveBeenCalledTimes(1);
   });
 });

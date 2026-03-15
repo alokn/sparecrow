@@ -18,11 +18,15 @@ vi.mock('../utils/index.js', () => ({
 import { cleanExpiredLogs, cleanExpiredTaskOutputs } from './log-retention.js';
 import { logger } from '../utils/index.js';
 
-/** Returns an ISO date string for today minus N days */
+/** Returns an ISO date string for today minus N days (pure UTC — no local timezone mixing). */
 function dateString(daysAgo: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - daysAgo);
-  return d.toISOString().slice(0, 10);
+  // Use Date.UTC to build the base epoch from today's UTC year/month/day, then subtract days.
+  // This avoids the bug where `new Date()` returns local time but setUTCDate mutates UTC fields —
+  // the combination can produce wrong dates when the local clock is behind UTC near midnight.
+  const now = new Date();
+  const utcBase = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const target = new Date(utcBase - daysAgo * 86_400_000);
+  return target.toISOString().slice(0, 10);
 }
 
 describe('cleanExpiredLogs', () => {
@@ -131,6 +135,38 @@ describe('cleanExpiredLogs', () => {
       'logs.retention.deleted',
       expect.objectContaining({ file: oldName }),
     );
+  });
+
+  it('removes only files older than 30 days from a set spanning 45 days (Story 21.1 AC2)', async () => {
+    // AC2: Given audit log files spanning 45 days with 30-day retention,
+    // only files older than 30 days are removed and recent files are preserved.
+    const filenames: string[] = [];
+    // Create files for each day from 1 to 45 days ago
+    for (let daysAgo = 1; daysAgo <= 45; daysAgo++) {
+      const name = `audit-${dateString(daysAgo)}.jsonl`;
+      filenames.push(name);
+      await writeFile(join(tmpDir, name), `log data for day -${daysAgo}`);
+    }
+
+    const result = await cleanExpiredLogs(tmpDir, 30);
+
+    // Files 1-30 days old should be retained (fileDate >= cutoff)
+    for (let daysAgo = 1; daysAgo <= 30; daysAgo++) {
+      const name = `audit-${dateString(daysAgo)}.jsonl`;
+      expect(result.retained).toContain(name);
+      expect(result.deleted).not.toContain(name);
+    }
+
+    // Files 31-45 days old should be deleted (fileDate < cutoff)
+    for (let daysAgo = 31; daysAgo <= 45; daysAgo++) {
+      const name = `audit-${dateString(daysAgo)}.jsonl`;
+      expect(result.deleted).toContain(name);
+      expect(result.retained).not.toContain(name);
+    }
+
+    // Verify total counts
+    expect(result.retained).toHaveLength(30);
+    expect(result.deleted).toHaveLength(15);
   });
 
   it('warns and skips file when unlink fails with unexpected non-ENOENT error', async () => {

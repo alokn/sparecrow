@@ -144,6 +144,51 @@ describe('registerCompletions()', () => {
     });
   });
 
+  describe('script syntax validation', () => {
+    it('bash script contains function declaration and complete builtin', async () => {
+      await program.parseAsync(['node', 'sparecrow', 'completions', 'bash']);
+      // Bash completion scripts must define a function and register it with `complete`
+      expect(stdoutOutput).toContain('_sparecrow_completions()');
+      expect(stdoutOutput).toContain('complete -F');
+      expect(stdoutOutput).toContain('COMPREPLY');
+      expect(stdoutOutput).toContain('COMP_WORDS');
+    });
+
+    it('zsh script contains compdef and _describe', async () => {
+      await program.parseAsync(['node', 'sparecrow', 'completions', 'zsh']);
+      // Zsh completion scripts need #compdef directive and _describe call
+      expect(stdoutOutput).toContain('#compdef');
+      expect(stdoutOutput).toContain('_sparecrow');
+      expect(stdoutOutput).toContain('_describe');
+    });
+
+    it('fish script uses complete -c syntax with subcommand flag', async () => {
+      await program.parseAsync(['node', 'sparecrow', 'completions', 'fish']);
+      // Fish completion scripts use `complete -c <command>` syntax
+      expect(stdoutOutput).toContain('complete -c sparecrow -f');
+      expect(stdoutOutput).toContain('complete -c sparecrow -n');
+      expect(stdoutOutput).toContain('__fish_use_subcommand');
+    });
+
+    it('fish script registers completions for both sparecrow and scrow aliases', async () => {
+      await program.parseAsync(['node', 'sparecrow', 'completions', 'fish']);
+      expect(stdoutOutput).toContain('complete -c sparecrow -f');
+      expect(stdoutOutput).toContain('complete -c scrow -f');
+      expect(stdoutOutput).toContain('complete -c scrow -n');
+    });
+
+    it('bash script registers completions for both sparecrow and scrow', async () => {
+      await program.parseAsync(['node', 'sparecrow', 'completions', 'bash']);
+      expect(stdoutOutput).toContain('complete -F _sparecrow_completions sparecrow');
+      expect(stdoutOutput).toContain('complete -F _sparecrow_completions scrow');
+    });
+
+    it('zsh script registers compdef for both sparecrow and scrow', async () => {
+      await program.parseAsync(['node', 'sparecrow', 'completions', 'zsh']);
+      expect(stdoutOutput).toMatch(/#compdef sparecrow scrow/);
+    });
+  });
+
   describe('unknown shell', () => {
     it('writes error to stderr for unsupported shell', async () => {
       await program.parseAsync(['node', 'sparecrow', 'completions', 'powershell']);
