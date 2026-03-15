@@ -1667,6 +1667,31 @@ describe('registerOnboard() — Story 5.3: edit loop template/repo/permissions/d
     expect(repoDaemonMock.installAndStartDaemon).toHaveBeenCalledTimes(1);
   });
 
+  it('exits with 1 when edit stage selector is cancelled', async () => {
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      runSummaryStage: vi.fn().mockResolvedValue('edit'),
+      runEditStageSelector: vi.fn().mockResolvedValue(cancelSymbol),
+    };
+
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn((v: unknown) => v === cancelSymbol),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
   it('exits with 1 when templates re-selection throws in edit loop', async () => {
     const runTemplateStageMock = vi
       .fn()
@@ -1700,5 +1725,413 @@ describe('registerOnboard() — Story 5.3: edit loop template/repo/permissions/d
     await program.parseAsync(['node', 'sparecrow', 'onboard']);
     expect(process.exit).toHaveBeenCalledWith(1);
     expect(stdoutOutput).toContain('TEMPLATE LOAD ERROR');
+  });
+});
+
+// ── Story 20.5: Onboarding Rollback Completeness Tests ────────────────────
+
+describe('registerOnboard() — Story 20.5: rollback when daemon install fails (AC1)', () => {
+  let stdoutOutput: string;
+
+  beforeEach(() => {
+    vi.resetModules();
+    stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+    vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => undefined,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: undefined, configurable: true });
+  });
+
+  it('rolls back config and queue when installAndStartDaemon throws (service enable failure)', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      installAndStartDaemon: vi.fn().mockRejectedValue(new Error('systemctl enable failed')),
+      rollbackSnapshots: rollbackMock,
+      cleanupServiceArtifacts: cleanupMock,
+      captureSnapshots: vi.fn().mockResolvedValue({
+        configSnapshot: 'old-config-content',
+        queueSnapshot: '{"tasks":[]}',
+        configPath: '/tmp/config.yaml',
+        queuePath: '/tmp/queue.json',
+      }),
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard', '--install-daemon']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    // Verify rollback was called with captured snapshots
+    expect(rollbackMock).toHaveBeenCalledWith(
+      '/tmp/config.yaml',
+      'old-config-content',
+      '/tmp/queue.json',
+      '{"tasks":[]}',
+    );
+    // Verify service artifacts cleaned up
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    // Verify user told state was restored
+    expect(stdoutOutput).toContain('Prior configuration and queue state have been restored');
+  });
+
+  it('does not call cleanupServiceArtifacts when --install-daemon is not passed and apply fails', async () => {
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      persistFullConfig: vi.fn().mockRejectedValue(new Error('write error')),
+      rollbackSnapshots: vi.fn().mockResolvedValue(true),
+      cleanupServiceArtifacts: cleanupMock,
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    // cleanupServiceArtifacts should NOT be called when daemon install was not requested
+    expect(cleanupMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerOnboard() — Story 20.5: rollback when post-install daemon start fails (AC2)', () => {
+  let stdoutOutput: string;
+
+  beforeEach(() => {
+    vi.resetModules();
+    stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+    vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => undefined,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: undefined, configurable: true });
+  });
+
+  it('rolls back config, queue, and service when daemon health check fails (PID never written)', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      installAndStartDaemon: vi.fn().mockResolvedValue({ healthy: false, pid: null }),
+      rollbackSnapshots: rollbackMock,
+      cleanupServiceArtifacts: cleanupMock,
+      captureSnapshots: vi.fn().mockResolvedValue({
+        configSnapshot: null,
+        queueSnapshot: null,
+        configPath: '/tmp/config.yaml',
+        queuePath: '/tmp/queue.json',
+      }),
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard', '--install-daemon']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    // Verify rollback called with null snapshots (config/queue didn't exist before)
+    expect(rollbackMock).toHaveBeenCalledWith('/tmp/config.yaml', null, '/tmp/queue.json', null);
+    // Verify service artifacts cleaned up (service file removed)
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    // Verify error message about health verification
+    expect(stdoutOutput).toContain('health verification timed out');
+  });
+
+  it('shows rollback warning when both daemon health and rollback fail', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(false);
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      installAndStartDaemon: vi.fn().mockResolvedValue({ healthy: false, pid: null }),
+      rollbackSnapshots: rollbackMock,
+      cleanupServiceArtifacts: cleanupMock,
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard', '--install-daemon']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(stdoutOutput).toContain('Could not fully restore prior state');
+    expect(stdoutOutput).toContain('sparecrow doctor');
+  });
+});
+
+describe('registerOnboard() — Story 20.5: rollback when queue seeding partially completes (AC3)', () => {
+  let stdoutOutput: string;
+
+  beforeEach(() => {
+    vi.resetModules();
+    stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+    vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => undefined,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: undefined, configurable: true });
+  });
+
+  it('rolls back ALL queue entries when seedQueue throws mid-way through templates', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      seedQueue: vi.fn().mockRejectedValue(new Error('queue write failed on 4th template')),
+      rollbackSnapshots: rollbackMock,
+      captureSnapshots: vi.fn().mockResolvedValue({
+        configSnapshot: 'existing-config',
+        queueSnapshot: '{"tasks":[]}',
+        configPath: '/tmp/config.yaml',
+        queuePath: '/tmp/queue.json',
+      }),
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    // Verify rollback restores both config and queue to pre-seeding state
+    expect(rollbackMock).toHaveBeenCalledWith(
+      '/tmp/config.yaml',
+      'existing-config',
+      '/tmp/queue.json',
+      '{"tasks":[]}',
+    );
+    // Verify user sees success restore message
+    expect(stdoutOutput).toContain('Prior configuration and queue state have been restored');
+  });
+
+  it('rolls back queue when seedQueue fails and queue did not exist before (null snapshot)', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      seedQueue: vi.fn().mockRejectedValue(new Error('queue write failed')),
+      rollbackSnapshots: rollbackMock,
+      captureSnapshots: vi.fn().mockResolvedValue({
+        configSnapshot: null,
+        queueSnapshot: null,
+        configPath: '/tmp/config.yaml',
+        queuePath: '/tmp/queue.json',
+      }),
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    // Verify rollback was called with null snapshots (will delete newly created files)
+    expect(rollbackMock).toHaveBeenCalledWith('/tmp/config.yaml', null, '/tmp/queue.json', null);
+  });
+});
+
+describe('registerOnboard() — Story 20.5: no artifacts remain after rollback (AC4)', () => {
+  let stdoutOutput: string;
+
+  beforeEach(() => {
+    vi.resetModules();
+    stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+    vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => undefined,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: undefined, configurable: true });
+  });
+
+  it('invokes rollbackSnapshots AND cleanupServiceArtifacts when daemon install fails (complete cleanup)', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      installAndStartDaemon: vi.fn().mockRejectedValue(new Error('launchd load failed')),
+      rollbackSnapshots: rollbackMock,
+      cleanupServiceArtifacts: cleanupMock,
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard', '--install-daemon']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    // Both cleanup mechanisms must be called to ensure no artifacts remain
+    expect(rollbackMock).toHaveBeenCalledTimes(1);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('invokes rollbackSnapshots but not cleanupServiceArtifacts when config persistence fails without daemon flag', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      persistFullConfig: vi.fn().mockRejectedValue(new Error('ENOSPC')),
+      rollbackSnapshots: rollbackMock,
+      cleanupServiceArtifacts: cleanupMock,
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(rollbackMock).toHaveBeenCalledTimes(1);
+    // Service cleanup should not be called when daemon was not being installed
+    expect(cleanupMock).not.toHaveBeenCalled();
+  });
+
+  it('invokes rollbackSnapshots AND cleanupServiceArtifacts when daemon health check fails (complete cleanup)', async () => {
+    const rollbackMock = vi.fn().mockResolvedValue(true);
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    const repoDaemonMock = {
+      ...mockRepoDaemonDefaults(),
+      installAndStartDaemon: vi.fn().mockResolvedValue({ healthy: false, pid: null }),
+      rollbackSnapshots: rollbackMock,
+      cleanupServiceArtifacts: cleanupMock,
+    };
+    vi.doMock('@clack/prompts', () => ({
+      intro: vi.fn(),
+      outro: vi.fn(),
+      confirm: vi.fn(),
+      isCancel: vi.fn().mockReturnValue(false),
+      spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    }));
+    vi.doMock('./onboard-auth.js', () => happyAuthMock());
+    vi.doMock('./onboard-trigger-template.js', () => mockTriggerTemplateDefaults());
+    vi.doMock('./onboard-repository-daemon.js', () => repoDaemonMock);
+    vi.doMock('./onboard-container.js', () => mockContainerDefaults());
+    const { registerOnboard } = await import('./onboard.js');
+    const program = makeProgram();
+    registerOnboard(program);
+    await program.parseAsync(['node', 'sparecrow', 'onboard', '--install-daemon']);
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(rollbackMock).toHaveBeenCalledTimes(1);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
   });
 });

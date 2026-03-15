@@ -40,6 +40,14 @@ const PersistedTaskBase = z.object({
     .refine((s) => !Number.isNaN(Date.parse(s)), {
       message: 'createdAt must be a valid ISO 8601 date string',
     }),
+  // Backward compatibility: legacy queue.json records may not have completedAt.
+  completedAt: z
+    .string()
+    .min(1)
+    .refine((s) => !Number.isNaN(Date.parse(s)), {
+      message: 'completedAt must be a valid ISO 8601 date string',
+    })
+    .optional(),
   timeoutMs: z.number().int().nonnegative(),
   // Backward compatibility: legacy queue.json records may not have actions field.
   actions: z.array(ActionTypeSchema).default([]),

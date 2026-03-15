@@ -16,6 +16,8 @@ export const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 function toPersistedTask(task: TaskDefinition): PersistedTask {
   const createdAt =
     task.createdAt instanceof Date ? task.createdAt.toISOString() : String(task.createdAt);
+  const completedAt =
+    task.completedAt instanceof Date ? task.completedAt.toISOString() : task.completedAt;
   const base = {
     id: task.id,
     name: task.name,
@@ -24,6 +26,7 @@ function toPersistedTask(task: TaskDefinition): PersistedTask {
     targetPath: task.targetPath,
     priority: task.priority,
     createdAt,
+    ...(completedAt !== undefined ? { completedAt } : {}),
     timeoutMs: task.timeoutMs,
     actions: Array.from(task.actions),
   };
@@ -42,6 +45,7 @@ function fromPersistedTask(pt: PersistedTask): TaskDefinition {
     targetPath: pt.targetPath,
     priority: pt.priority,
     createdAt: new Date(pt.createdAt),
+    ...(pt.completedAt !== undefined ? { completedAt: new Date(pt.completedAt) } : {}),
     timeoutMs: pt.timeoutMs,
     actions: pt.actions ?? [],
   };

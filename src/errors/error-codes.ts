@@ -64,6 +64,7 @@ export const ErrorCode = Object.freeze({
   TASK_PARTIAL_OUTPUT_NOT_FOUND: 'TASK_PARTIAL_OUTPUT_NOT_FOUND',
   TASK_AMBIGUOUS: 'TASK_AMBIGUOUS',
   INVALID_ARGUMENT: 'INVALID_ARGUMENT',
+  QUEUE_INVALID_TRANSITION: 'QUEUE_INVALID_TRANSITION',
 } as const);
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

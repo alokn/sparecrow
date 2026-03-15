@@ -335,4 +335,107 @@ describe('queue commands (suite 07)', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('security-audit');
   });
+
+  // Story 20.1 AC1 — empty history returns hint
+  it('queue history exits 0 with "No history." when no tasks have completed', () => {
+    const result = runCli(['queue', 'history'], baseEnv(homeDir));
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('No history.');
+  });
+
+  // Story 20.1 AC5 — E2E round-trip: queue history shows completed/failed tasks
+  it(
+    'queue history shows done and failed tasks after seeding queue with historical statuses',
+    { timeout: 60000 },
+    async () => {
+      const doneTask: PersistedTask = {
+        ...makeTask('completed-task', repoPath, 1),
+        status: 'done',
+      };
+      const failedTask: PersistedTask = {
+        ...makeTask('broken-task', repoPath, 2),
+        status: 'failed',
+      };
+      const skippedTask: PersistedTask = {
+        ...makeTask('skipped-task', repoPath, 3),
+        status: 'skipped',
+      };
+      // Seed excluded-status tasks to verify AC3 exclusion for all non-historical statuses
+      const pendingTask = makeTask('pending-task', repoPath, 4);
+      const inProgressTask: PersistedTask = {
+        ...makeTask('in-progress-task', repoPath, 5),
+        status: 'in-progress',
+      };
+      const failedQuotaTask: PersistedTask = {
+        ...makeTask('failed-quota-task', repoPath, 6),
+        status: 'failed_quota',
+      };
+
+      await seedQueue(homeDir, [
+        doneTask,
+        failedTask,
+        skippedTask,
+        pendingTask,
+        inProgressTask,
+        failedQuotaTask,
+      ]);
+
+      const result = runCli(['queue', 'history'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('HISTORY');
+      expect(result.stdout).toContain('completed-task');
+      expect(result.stdout).toContain('broken-task');
+      expect(result.stdout).toContain('skipped-task');
+      // AC3: live-status tasks must not appear in history
+      expect(result.stdout).not.toContain('pending-task');
+      expect(result.stdout).not.toContain('in-progress-task');
+      expect(result.stdout).not.toContain('failed-quota-task');
+    },
+  );
+
+  // Story 20.1 AC4 — JSON mode returns valid envelope with most-recent-first ordering
+  it(
+    'queue history --json returns valid envelope with historical tasks sorted most-recent-first',
+    { timeout: 60000 },
+    async () => {
+      // Use distinct createdAt timestamps so sort order is deterministic
+      const doneTask: PersistedTask = {
+        ...makeTask('json-done-task', repoPath, 1),
+        status: 'done',
+        createdAt: '2026-01-01T10:00:00.000Z',
+      };
+      const failedTask: PersistedTask = {
+        ...makeTask('json-failed-task', repoPath, 2),
+        status: 'failed',
+        createdAt: '2026-01-01T11:00:00.000Z', // more recent → appears first
+      };
+
+      await seedQueue(homeDir, [doneTask, failedTask]);
+
+      const result = runCli(['--json', 'queue', 'history'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = JSON.parse(result.stdout.trim());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+      expect(parsed.data).not.toBeNull();
+      expect(parsed.data.tasks).toHaveLength(2);
+
+      const names = parsed.data.tasks.map((t: { name: string }) => t.name);
+      expect(names).toContain('json-done-task');
+      expect(names).toContain('json-failed-task');
+
+      // Assert most-recent-first ordering (json-failed-task has later createdAt)
+      expect(names[0]).toBe('json-failed-task');
+      expect(names[1]).toBe('json-done-task');
+
+      // Each task must have lastFailure field present (even if null)
+      for (const task of parsed.data.tasks) {
+        expect(task).toHaveProperty('lastFailure');
+      }
+    },
+  );
 });

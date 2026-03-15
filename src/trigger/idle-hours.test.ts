@@ -417,6 +417,124 @@ describe('isIdleTime', () => {
     });
   });
 
+  // DST spring-forward transition (AC4 of story 20-7)
+  describe('DST spring-forward transition (AC4)', () => {
+    // US DST 2026: clocks spring forward on March 8 at 2:00 AM → 3:00 AM
+    // In America/New_York, 2:00-2:59 AM does not exist on this day.
+    // UTC equivalents: 2:00 AM EST = 07:00 UTC; after spring-forward, 3:00 AM EDT = 07:00 UTC
+    // The "gap" hour (2:00-2:59 local) cannot occur, but we test times around it.
+
+    const entries: IdleHoursEntry[] = [{ start: '01:00', end: '04:00' }];
+
+    it('returns true at 1:30 AM before the spring-forward gap', () => {
+      // 2026-03-08 06:30 UTC = 1:30 AM EST (before clocks jump)
+      const now = utcDate(2026, 2, 8, 6, 30);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns true at 3:00 AM EDT (right after spring-forward)', () => {
+      // 2026-03-08 07:00 UTC = 3:00 AM EDT (clocks jumped from 2:00 to 3:00)
+      const now = utcDate(2026, 2, 8, 7, 0);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns true at 3:30 AM EDT (within range after spring-forward)', () => {
+      // 2026-03-08 07:30 UTC = 3:30 AM EDT
+      const now = utcDate(2026, 2, 8, 7, 30);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns false at 4:00 AM EDT (end of range, exclusive)', () => {
+      // 2026-03-08 08:00 UTC = 4:00 AM EDT
+      const now = utcDate(2026, 2, 8, 8, 0);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(false);
+    });
+
+    it('returns false at 12:00 PM EDT (well outside range)', () => {
+      // 2026-03-08 16:00 UTC = 12:00 PM EDT
+      const now = utcDate(2026, 2, 8, 16, 0);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(false);
+    });
+
+    it('returns true just before the spring-forward gap (no UTC timestamp maps to the gap period)', () => {
+      // 2026-03-08 06:45 UTC = 1:45 AM EST, within the 01:00-04:00 idle window.
+      // The gap hour (2:00-2:59 AM local) is genuinely inaccessible via any UTC timestamp —
+      // no clock time exists there on DST day. This confirms the function evaluates correctly
+      // for the last valid pre-gap moment; the gap itself cannot be directly tested.
+      const now = utcDate(2026, 2, 8, 6, 45);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+  });
+
+  // DST fall-back transition (AC5 of story 20-7)
+  describe('DST fall-back transition (AC5)', () => {
+    // US DST 2026: clocks fall back on November 1 at 2:00 AM → 1:00 AM
+    // In America/New_York, 1:00-1:59 AM occurs twice (EDT then EST).
+    // UTC equivalents:
+    //   1:30 AM EDT (first occurrence) = 05:30 UTC
+    //   1:30 AM EST (second occurrence) = 06:30 UTC
+
+    const entries: IdleHoursEntry[] = [{ start: '01:00', end: '03:00' }];
+
+    it('returns true at 1:30 AM EDT (first occurrence, before fall-back)', () => {
+      // 2026-11-01 05:30 UTC = 1:30 AM EDT (first occurrence)
+      const now = utcDate(2026, 10, 1, 5, 30);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns true at 1:30 AM EST (second occurrence, after fall-back)', () => {
+      // 2026-11-01 06:30 UTC = 1:30 AM EST (second occurrence)
+      const now = utcDate(2026, 10, 1, 6, 30);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns true at 2:30 AM EST (after both occurrences of 1 AM)', () => {
+      // 2026-11-01 07:30 UTC = 2:30 AM EST
+      const now = utcDate(2026, 10, 1, 7, 30);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns false at 3:00 AM EST (end of range, exclusive)', () => {
+      // 2026-11-01 08:00 UTC = 3:00 AM EST
+      const now = utcDate(2026, 10, 1, 8, 0);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(false);
+    });
+
+    it('returns true at 1:00 AM EDT (exact start, first occurrence)', () => {
+      // 2026-11-01 05:00 UTC = 1:00 AM EDT
+      const now = utcDate(2026, 10, 1, 5, 0);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns true at 1:00 AM EST (exact start, second occurrence)', () => {
+      // 2026-11-01 06:00 UTC = 1:00 AM EST
+      const now = utcDate(2026, 10, 1, 6, 0);
+      expect(isIdleTime(entries, now, 'America/New_York')).toBe(true);
+    });
+
+    it('returns true at all points during the repeated hour (no double-counting or missed window)', () => {
+      // The idle range is 01:00-03:00. During the fall-back transition, the hour 1:00-1:59 AM
+      // occurs twice (once as EDT = UTC+5, once as EST = UTC+6). All UTC timestamps in the
+      // range 05:00-06:59 UTC map to local times inside the 01:00-03:00 idle window.
+      // UTC 07:00 = 2:00 AM EST, still inside the window.
+      const expected: [number, number, boolean][] = [
+        [5, 0, true], // 1:00 AM EDT — exact start (first occurrence)
+        [5, 15, true], // 1:15 AM EDT
+        [5, 30, true], // 1:30 AM EDT
+        [5, 45, true], // 1:45 AM EDT
+        [6, 0, true], // 1:00 AM EST — exact start (second occurrence)
+        [6, 15, true], // 1:15 AM EST
+        [6, 30, true], // 1:30 AM EST
+        [6, 45, true], // 1:45 AM EST
+        [7, 0, true], // 2:00 AM EST — inside window
+      ];
+      for (const [hour, minute, expectedResult] of expected) {
+        const now = new Date(Date.UTC(2026, 10, 1, hour, minute));
+        expect(isIdleTime(entries, now, 'America/New_York')).toBe(expectedResult);
+      }
+    });
+  });
+
   // Near full-day range (23:59 gap)
   describe('near full-day range', () => {
     const entries: IdleHoursEntry[] = [{ start: '00:00', end: '23:59' }];

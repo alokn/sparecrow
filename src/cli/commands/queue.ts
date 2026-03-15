@@ -186,21 +186,20 @@ export function renderHistoryTable(
   );
 
   const table = new Table({
-    head: ['', 'Name', 'Status', 'Type', 'Timeout', 'Target'],
+    head: ['', 'Name', 'Status', 'Type', 'Completed', 'Target'],
     style: { head: [], border: [] },
     colWidths: [null, null, null, null, null, 40],
   });
 
   for (const task of sorted) {
     const icon = task.status === 'done' ? '\u2713' : task.status === 'failed' ? '\u2717' : '\u2013';
-    table.push([
-      icon,
-      task.name,
-      task.status,
-      task.type,
-      formatTimeout(task.timeoutMs),
-      task.targetPath,
-    ]);
+    const completedDisplay = task.completedAt
+      ? task.completedAt
+          .toISOString()
+          .replace('T', ' ')
+          .replace(/\.\d{3}Z$/, ' UTC')
+      : '—';
+    table.push([icon, task.name, task.status, task.type, completedDisplay, task.targetPath]);
     const errorCode = failureMap?.get(task.name);
     if (errorCode) {
       const humanMsg = humanizeErrorCode(errorCode, humanizeCtx);
@@ -397,7 +396,11 @@ export function registerQueue(program: Command): void {
       const humanizeCtx: HumanizeContext = memoryLimitMb !== undefined ? { memoryLimitMb } : {};
 
       if (historical.length === 0) {
-        process.stdout.write('No history.\n');
+        if (isJsonMode()) {
+          printJson(jsonOk({ tasks: [] }));
+        } else {
+          process.stdout.write('No history.\n');
+        }
         return;
       }
 

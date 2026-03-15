@@ -152,3 +152,86 @@ describe('registerCompletions()', () => {
     });
   });
 });
+
+// JSON mode tests — use vi.resetModules() + vi.doMock() to simulate isJsonMode() === true
+describe('registerCompletions() --json mode', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => true,
+      getConfigPath: () => undefined,
+      isInteractive: () => false,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('emits JSON envelope with shell and script when isJsonMode returns true (bash)', async () => {
+    const { registerCompletions: registerCompletionsJson } = await import('./completions.js');
+    const cmd = new Command();
+    cmd.exitOverride();
+    registerCompletionsJson(cmd);
+
+    let stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+
+    await cmd.parseAsync(['node', 'sparecrow', 'completions', 'bash']);
+
+    const parsed = JSON.parse(stdoutOutput) as Record<string, unknown>;
+    expect(parsed['ok']).toBe(true);
+    expect(parsed['error']).toBeNull();
+    const data = parsed['data'] as Record<string, unknown>;
+    expect(data['shell']).toBe('bash');
+    expect(typeof data['script']).toBe('string');
+    expect((data['script'] as string).length).toBeGreaterThan(0);
+  });
+
+  it('emits JSON envelope with shell and script when isJsonMode returns true (zsh)', async () => {
+    const { registerCompletions: registerCompletionsJson } = await import('./completions.js');
+    const cmd = new Command();
+    cmd.exitOverride();
+    registerCompletionsJson(cmd);
+
+    let stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+
+    await cmd.parseAsync(['node', 'sparecrow', 'completions', 'zsh']);
+
+    const parsed = JSON.parse(stdoutOutput) as Record<string, unknown>;
+    expect(parsed['ok']).toBe(true);
+    expect(parsed['error']).toBeNull();
+    const data = parsed['data'] as Record<string, unknown>;
+    expect(data['shell']).toBe('zsh');
+    expect(typeof data['script']).toBe('string');
+  });
+
+  it('emits JSON envelope with shell and script when isJsonMode returns true (fish)', async () => {
+    const { registerCompletions: registerCompletionsJson } = await import('./completions.js');
+    const cmd = new Command();
+    cmd.exitOverride();
+    registerCompletionsJson(cmd);
+
+    let stdoutOutput = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((data) => {
+      stdoutOutput += String(data);
+      return true;
+    });
+
+    await cmd.parseAsync(['node', 'sparecrow', 'completions', 'fish']);
+
+    const parsed = JSON.parse(stdoutOutput) as Record<string, unknown>;
+    expect(parsed['ok']).toBe(true);
+    expect(parsed['error']).toBeNull();
+    const data = parsed['data'] as Record<string, unknown>;
+    expect(data['shell']).toBe('fish');
+    expect(typeof data['script']).toBe('string');
+  });
+});

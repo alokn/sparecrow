@@ -1,5 +1,5 @@
 /** Onboarding helpers — repository targeting, queue seeding, and daemon install orchestration. */
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, unlink } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { text, select, confirm, isCancel, spinner } from '@clack/prompts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -8,6 +8,7 @@ import { validateRepository, atomicWrite, logger } from '../../utils/index.js';
 import {
   getPaths,
   installService,
+  uninstallService,
   isLinux,
   isMacOS,
   getPlatformServicePath,
@@ -340,9 +341,15 @@ export async function installAndStartDaemon(): Promise<HealthCheckResult> {
 export async function verifyDaemonHealth(): Promise<HealthCheckResult> {
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const status = await getDaemonStatus();
-    if (status.state === 'running' && status.pid !== null) {
-      return { healthy: true, pid: status.pid };
+    try {
+      const status = await getDaemonStatus();
+      if (status.state === 'running' && status.pid !== null) {
+        return { healthy: true, pid: status.pid };
+      }
+    } catch (err) {
+      void logger.warn('onboard.daemon.health_poll_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     await new Promise<void>((r) => setTimeout(r, HEALTH_POLL_INTERVAL_MS));
   }
@@ -352,6 +359,10 @@ export async function verifyDaemonHealth(): Promise<HealthCheckResult> {
 /**
  * Captures pre-apply snapshots for rollback.
  * Returns file contents (or null if not found).
+ *
+ * @precondition MUST be called BEFORE any write operations (persistFullConfig, seedQueue,
+ * installAndStartDaemon). If called after writes, snapshots capture modified state and
+ * rollback will restore wrong content — a critical correctness invariant.
  */
 export async function captureSnapshots(): Promise<{
   configSnapshot: string | null;
@@ -370,6 +381,7 @@ export async function captureSnapshots(): Promise<{
 
 /**
  * Restores pre-apply snapshots on failure.
+ * Also removes daemon.pid and daemon-status.json if they were written during the failed apply.
  * Logs but does not throw if rollback itself fails.
  */
 export async function rollbackSnapshots(
@@ -384,7 +396,6 @@ export async function rollbackSnapshots(
       await atomicWrite(configPath, configSnapshot);
     } else {
       // Config didn't exist before — try to remove the newly created one
-      const { unlink } = await import('node:fs/promises');
       await unlink(configPath).catch(() => {});
     }
   } catch (err) {
@@ -397,8 +408,10 @@ export async function rollbackSnapshots(
   try {
     if (queueSnapshot !== null) {
       await atomicWrite(queuePath, queueSnapshot);
+    } else {
+      // Queue didn't exist before — remove any partially-seeded queue file (AC3/AC4)
+      await unlink(queuePath).catch(() => {});
     }
-    // If queue didn't exist before but was created, leave it (empty queue is harmless)
   } catch (err) {
     void logger.error('onboard.rollback.queue_failed', {
       error: err instanceof Error ? err.message : String(err),
@@ -406,21 +419,40 @@ export async function rollbackSnapshots(
     success = false;
   }
 
+  // AC4: Remove daemon state files if they were written during the failed apply.
+  // These are best-effort — failures are logged but do not affect rollback success flag.
+  const stateDir = getPaths().data;
+  await unlink(join(stateDir, 'daemon.pid')).catch(() => {});
+  await unlink(join(stateDir, 'daemon-status.json')).catch(() => {});
+
   return success;
 }
 
 /**
- * Removes partially-created service artifacts on rollback (AC9).
- * Only removes the service file if it exists — does not attempt to unload/disable
- * since the service may not have been loaded successfully.
+ * Fully uninstalls a partially-created service on rollback (AC1, AC2, AC9).
+ * Calls uninstallService() to disable and remove the service unit from systemd/launchd,
+ * ensuring the daemon is not registered and will not auto-start after rollback.
+ * Falls back to raw unlink if uninstallService throws (e.g. service was never enabled).
+ * Logs errors but does not throw.
  */
 export async function cleanupServiceArtifacts(): Promise<void> {
   try {
     const servicePath = getPlatformServicePath();
     if (await serviceFileExists(servicePath)) {
-      const { unlink } = await import('node:fs/promises');
-      await unlink(servicePath);
-      void logger.info('onboard.rollback.service_artifact_removed', { path: servicePath });
+      try {
+        await uninstallService();
+        void logger.info('onboard.rollback.service_uninstalled', { path: servicePath });
+      } catch (uninstallErr) {
+        // uninstallService may fail if the service was never registered — fall back to raw delete
+        void logger.warn('onboard.rollback.service_uninstall_fallback', {
+          error: uninstallErr instanceof Error ? uninstallErr.message : String(uninstallErr),
+        });
+        await unlink(servicePath).catch((unlinkErr: unknown) => {
+          void logger.error('onboard.rollback.service_cleanup_failed', {
+            error: unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr),
+          });
+        });
+      }
     }
   } catch (err) {
     void logger.error('onboard.rollback.service_cleanup_failed', {

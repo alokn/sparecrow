@@ -277,6 +277,11 @@ const ERROR_MESSAGES: Record<ErrorCodeValue, ErrorUserMessage> = {
     userMessage: 'Invalid argument provided.',
     suggestion: 'Run: sparecrow --help for usage details',
   },
+  [ErrorCode.QUEUE_INVALID_TRANSITION]: {
+    userMessage: 'Invalid task status transition.',
+    suggestion:
+      'Valid lifecycle: pending -> in-progress -> done/failed/failed_quota; pending -> skipped; failed_quota -> in-progress/pending. Terminal states (done, failed, skipped) have no outgoing transitions.',
+  },
 };
 
 export function getErrorMessage(code: ErrorCodeValue): ErrorUserMessage {

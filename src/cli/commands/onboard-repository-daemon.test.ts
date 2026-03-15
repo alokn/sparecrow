@@ -450,6 +450,61 @@ describe('captureSnapshots() and rollbackSnapshots()', () => {
     expect(queueContent).toBe(originalQueueContent);
   });
 
+  it('rollback deletes queue file when queueSnapshot is null (AC3/AC4 — queue did not exist before)', async () => {
+    const configPath = join(tempDir, 'config.yaml');
+    const queuePath = join(tempDir, 'queue.json');
+    // Simulate files created during onboarding (queue didn't exist before)
+    await writeFile(configPath, 'new-config');
+    await writeFile(queuePath, '{"tasks":[{"id":"1"},{"id":"2"},{"id":"3"}]}');
+
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: tempDir, config: tempDir }),
+      installService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => configPath,
+    }));
+
+    const { rollbackSnapshots } = await import('./onboard-repository-daemon.js');
+    const ok = await rollbackSnapshots(configPath, null, queuePath, null);
+    expect(ok).toBe(true);
+
+    // Config should be deleted (null snapshot = did not exist before)
+    const { access } = await import('node:fs/promises');
+    await expect(access(configPath)).rejects.toThrow();
+    // Queue should also be deleted (null snapshot = did not exist before, AC3/AC4)
+    await expect(access(queuePath)).rejects.toThrow();
+  });
+
+  it('rollback deletes queue file gracefully when it does not exist on disk (null snapshot, ENOENT)', async () => {
+    const configPath = join(tempDir, 'config.yaml');
+    const queuePath = join(tempDir, 'nonexistent-queue.json');
+    await writeFile(configPath, 'new-config');
+
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: tempDir, config: tempDir }),
+      installService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => configPath,
+    }));
+
+    const { rollbackSnapshots } = await import('./onboard-repository-daemon.js');
+    const ok = await rollbackSnapshots(configPath, null, queuePath, null);
+    expect(ok).toBe(true);
+
+    // Should not throw even though queue file doesn't exist
+    const { access } = await import('node:fs/promises');
+    await expect(access(configPath)).rejects.toThrow();
+    await expect(access(queuePath)).rejects.toThrow();
+  });
+
   it('rollback returns false when queue restore fails (M3 lines 409-412)', async () => {
     const configPath = join(tempDir, 'config.yaml');
     const queuePath = join(tempDir, 'queue.json');
@@ -1147,13 +1202,15 @@ describe('cleanupServiceArtifacts()', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it('removes service file when it exists', async () => {
+  it('calls uninstallService() when service file exists (AC1/AC2 compliance — full unregister)', async () => {
     const servicePath = join(tempDir, 'sparecrow.service');
     await writeFile(servicePath, 'service content');
+    const uninstallServiceMock = vi.fn().mockResolvedValue({ platform: 'linux', removed: true });
 
     vi.doMock('../../platform/index.js', () => ({
       getPaths: () => ({ data: tempDir, config: tempDir }),
       installService: vi.fn(),
+      uninstallService: uninstallServiceMock,
       isLinux: () => true,
       isMacOS: () => false,
       getPlatformServicePath: () => servicePath,
@@ -1167,7 +1224,33 @@ describe('cleanupServiceArtifacts()', () => {
     const { cleanupServiceArtifacts } = await import('./onboard-repository-daemon.js');
     await cleanupServiceArtifacts();
 
-    // Verify file was removed
+    // AC1/AC2: uninstallService must be called to disable/unregister the unit, not just delete the file
+    expect(uninstallServiceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to raw unlink when uninstallService throws and still removes service file', async () => {
+    const servicePath = join(tempDir, 'sparecrow.service');
+    await writeFile(servicePath, 'service content');
+    const uninstallServiceMock = vi.fn().mockRejectedValue(new Error('systemctl not available'));
+
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: tempDir, config: tempDir }),
+      installService: vi.fn(),
+      uninstallService: uninstallServiceMock,
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => servicePath,
+      serviceFileExists: vi.fn().mockResolvedValue(true),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => join(tempDir, 'config.yaml'),
+    }));
+
+    const { cleanupServiceArtifacts } = await import('./onboard-repository-daemon.js');
+    await cleanupServiceArtifacts();
+
+    // Fallback: file should still be removed via raw unlink
     let exists = true;
     try {
       await readFile(servicePath, 'utf-8');
@@ -1177,10 +1260,37 @@ describe('cleanupServiceArtifacts()', () => {
     expect(exists).toBe(false);
   });
 
+  it('logs error and does not throw when uninstallService throws and unlink also fails (EACCES path)', async () => {
+    // Service path points to a directory to simulate EACCES/EISDIR — unlink a dir fails
+    const serviceDir = join(tempDir, 'sparecrow-dir.service');
+    await mkdir(serviceDir, { recursive: true });
+    const uninstallServiceMock = vi.fn().mockRejectedValue(new Error('systemctl failed'));
+
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: tempDir, config: tempDir }),
+      installService: vi.fn(),
+      uninstallService: uninstallServiceMock,
+      isLinux: () => true,
+      isMacOS: () => false,
+      // servicePath points to a directory — unlink(dir) throws EISDIR, simulating EACCES
+      getPlatformServicePath: () => serviceDir,
+      serviceFileExists: vi.fn().mockResolvedValue(true),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => join(tempDir, 'config.yaml'),
+    }));
+
+    const { cleanupServiceArtifacts } = await import('./onboard-repository-daemon.js');
+    // Should not throw even when both uninstallService and unlink fail
+    await expect(cleanupServiceArtifacts()).resolves.toBeUndefined();
+  });
+
   it('does not throw when service file does not exist', async () => {
     vi.doMock('../../platform/index.js', () => ({
       getPaths: () => ({ data: tempDir, config: tempDir }),
       installService: vi.fn(),
+      uninstallService: vi.fn(),
       isLinux: () => true,
       isMacOS: () => false,
       getPlatformServicePath: () => join(tempDir, 'nonexistent.service'),
@@ -1195,10 +1305,11 @@ describe('cleanupServiceArtifacts()', () => {
     await expect(cleanupServiceArtifacts()).resolves.toBeUndefined();
   });
 
-  it('logs error and does not throw when getPlatformServicePath throws (M3 line 432)', async () => {
+  it('logs error and does not throw when getPlatformServicePath throws', async () => {
     vi.doMock('../../platform/index.js', () => ({
       getPaths: () => ({ data: tempDir, config: tempDir }),
       installService: vi.fn(),
+      uninstallService: vi.fn(),
       isLinux: () => true,
       isMacOS: () => false,
       getPlatformServicePath: () => {
@@ -1638,5 +1749,228 @@ describe('runEditStageSelector() — no backend option (Story 10-13)', () => {
     };
     const backendOption = options.options.find((o: { value: string }) => o.value === 'backend');
     expect(backendOption).toBeUndefined();
+  });
+});
+
+describe('verifyDaemonHealth() — direct unit tests (Story 20.5 review)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('returns healthy=true and pid when daemon reports running state immediately', async () => {
+    vi.doMock('../../daemon/index.js', () => ({
+      getDaemonStatus: vi.fn().mockResolvedValue({ state: 'running', pid: 42 }),
+      startDaemon: vi.fn(),
+      DAEMON_RUNNER_FLAG: '--daemon',
+    }));
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: '/tmp', config: '/tmp' }),
+      installService: vi.fn(),
+      uninstallService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => '/tmp/service',
+      serviceFileExists: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => '/tmp/config.yaml',
+    }));
+
+    const { verifyDaemonHealth } = await import('./onboard-repository-daemon.js');
+    const resultPromise = verifyDaemonHealth();
+    // Advance timers to allow the polling loop to resolve
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    expect(result).toEqual({ healthy: true, pid: 42 });
+  });
+
+  it('returns healthy=false and pid=null when timeout expires before daemon is running', async () => {
+    vi.doMock('../../daemon/index.js', () => ({
+      getDaemonStatus: vi.fn().mockResolvedValue({ state: 'stopped', pid: null }),
+      startDaemon: vi.fn(),
+      DAEMON_RUNNER_FLAG: '--daemon',
+    }));
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: '/tmp', config: '/tmp' }),
+      installService: vi.fn(),
+      uninstallService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => '/tmp/service',
+      serviceFileExists: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => '/tmp/config.yaml',
+    }));
+
+    const { verifyDaemonHealth } = await import('./onboard-repository-daemon.js');
+    const resultPromise = verifyDaemonHealth();
+    // Advance past the 10s health timeout to force timeout-expiry path
+    await vi.advanceTimersByTimeAsync(11_000);
+    const result = await resultPromise;
+    expect(result).toEqual({ healthy: false, pid: null });
+  });
+
+  it('returns healthy=true on mid-loop success after initial stopped state', async () => {
+    let callCount = 0;
+    vi.doMock('../../daemon/index.js', () => ({
+      getDaemonStatus: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount < 3) return { state: 'stopped', pid: null };
+        return { state: 'running', pid: 99 };
+      }),
+      startDaemon: vi.fn(),
+      DAEMON_RUNNER_FLAG: '--daemon',
+    }));
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: '/tmp', config: '/tmp' }),
+      installService: vi.fn(),
+      uninstallService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => '/tmp/service',
+      serviceFileExists: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => '/tmp/config.yaml',
+    }));
+
+    const { verifyDaemonHealth } = await import('./onboard-repository-daemon.js');
+    const resultPromise = verifyDaemonHealth();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    expect(result).toEqual({ healthy: true, pid: 99 });
+  });
+
+  it('returns healthy=false when getDaemonStatus throws (error path treated as not-running)', async () => {
+    vi.doMock('../../daemon/index.js', () => ({
+      getDaemonStatus: vi.fn().mockRejectedValue(new Error('status read failed')),
+      startDaemon: vi.fn(),
+      DAEMON_RUNNER_FLAG: '--daemon',
+    }));
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: '/tmp', config: '/tmp' }),
+      installService: vi.fn(),
+      uninstallService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => '/tmp/service',
+      serviceFileExists: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => '/tmp/config.yaml',
+    }));
+
+    const { verifyDaemonHealth } = await import('./onboard-repository-daemon.js');
+    const resultPromise = verifyDaemonHealth();
+    await vi.advanceTimersByTimeAsync(11_000);
+    const result = await resultPromise;
+    expect(result).toEqual({ healthy: false, pid: null });
+  });
+});
+
+describe('rollbackSnapshots() — daemon state file cleanup (AC4, Story 20.5 review)', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    tempDir = join(tmpdir(), 'rollback-daemon-' + randomBytes(6).toString('hex'));
+    await mkdir(tempDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('removes daemon.pid and daemon-status.json when they exist after failed apply (AC4)', async () => {
+    const configPath = join(tempDir, 'config.yaml');
+    const queuePath = join(tempDir, 'queue.json');
+    const pidPath = join(tempDir, 'daemon.pid');
+    const statusPath = join(tempDir, 'daemon-status.json');
+
+    // Simulate daemon state files written during a failed apply
+    const { writeFile: wf } = await import('node:fs/promises');
+    await wf(pidPath, '1234');
+    await wf(statusPath, '{"state":"running"}');
+
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: tempDir, config: tempDir }),
+      installService: vi.fn(),
+      uninstallService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => join(tempDir, 'service'),
+      serviceFileExists: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => configPath,
+    }));
+    vi.doMock('../../utils/index.js', () => ({
+      atomicWrite: vi.fn().mockResolvedValue(undefined),
+      validateRepository: vi.fn(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    }));
+
+    const { rollbackSnapshots } = await import('./onboard-repository-daemon.js');
+    const ok = await rollbackSnapshots(configPath, null, queuePath, null);
+    expect(ok).toBe(true);
+
+    // AC4: daemon.pid must be removed after rollback
+    let pidExists = true;
+    try {
+      await readFile(pidPath, 'utf-8');
+    } catch {
+      pidExists = false;
+    }
+    expect(pidExists).toBe(false);
+
+    // AC4: daemon-status.json must be removed after rollback
+    let statusExists = true;
+    try {
+      await readFile(statusPath, 'utf-8');
+    } catch {
+      statusExists = false;
+    }
+    expect(statusExists).toBe(false);
+  });
+
+  it('succeeds when daemon.pid and daemon-status.json do not exist (no-op path)', async () => {
+    const configPath = join(tempDir, 'config.yaml');
+    const queuePath = join(tempDir, 'queue.json');
+
+    vi.doMock('../../platform/index.js', () => ({
+      getPaths: () => ({ data: tempDir, config: tempDir }),
+      installService: vi.fn(),
+      uninstallService: vi.fn(),
+      isLinux: () => true,
+      isMacOS: () => false,
+      getPlatformServicePath: () => join(tempDir, 'service'),
+      serviceFileExists: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('../index.js', () => ({
+      isJsonMode: () => false,
+      getConfigPath: () => configPath,
+    }));
+    vi.doMock('../../utils/index.js', () => ({
+      atomicWrite: vi.fn().mockResolvedValue(undefined),
+      validateRepository: vi.fn(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    }));
+
+    const { rollbackSnapshots } = await import('./onboard-repository-daemon.js');
+    // Should not throw when state files don't exist (ENOENT is swallowed)
+    await expect(rollbackSnapshots(configPath, null, queuePath, null)).resolves.toBe(true);
   });
 });

@@ -179,8 +179,7 @@ describe('CLI Framework', () => {
     });
 
     it('exits with code 3 for AUTH_TOKEN_EXPIRED error', async () => {
-      const { ScrowError } = await import('../errors/index.js');
-      const { ErrorCode } = await import('../errors/index.js');
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
       vi.doMock('./commands/status.js', () => ({
         registerStatus: (prog: {
           command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
@@ -197,8 +196,7 @@ describe('CLI Framework', () => {
     });
 
     it('exits with code 2 for DAEMON_NOT_RUNNING error', async () => {
-      const { ScrowError } = await import('../errors/index.js');
-      const { ErrorCode } = await import('../errors/index.js');
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
       vi.doMock('./commands/status.js', () => ({
         registerStatus: (prog: {
           command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
@@ -215,8 +213,7 @@ describe('CLI Framework', () => {
     });
 
     it('exits with code 1 for a general ScrowError', async () => {
-      const { ScrowError } = await import('../errors/index.js');
-      const { ErrorCode } = await import('../errors/index.js');
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
       vi.doMock('./commands/status.js', () => ({
         registerStatus: (prog: {
           command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
@@ -233,8 +230,7 @@ describe('CLI Framework', () => {
     });
 
     it('appends doctor hint to stderr for ScrowError in non-JSON mode', async () => {
-      const { ScrowError } = await import('../errors/index.js');
-      const { ErrorCode } = await import('../errors/index.js');
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
       vi.doMock('./commands/status.js', () => ({
         registerStatus: (prog: {
           command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
@@ -252,8 +248,7 @@ describe('CLI Framework', () => {
     });
 
     it('suppresses doctor hint in --json mode for ScrowError', async () => {
-      const { ScrowError } = await import('../errors/index.js');
-      const { ErrorCode } = await import('../errors/index.js');
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
       vi.doMock('./commands/status.js', () => ({
         registerStatus: (prog: {
           command: (name: string) => {
@@ -274,6 +269,18 @@ describe('CLI Framework', () => {
 
     it('suppresses doctor hint for CommanderError (user input error)', async () => {
       process.argv = ['node', 'sparecrow', 'xyz-unknown-command'];
+      const { run } = await import('./cli.js');
+      await run();
+      const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
+      expect(errOutput).not.toContain('sparecrow doctor');
+    });
+
+    it('suppresses doctor hint for invalid flag (CommanderError — missing required argument)', async () => {
+      // AC3: missing required argument for an option triggers a CommanderError;
+      // doctor hint must be suppressed because doctor cannot fix user input errors.
+      // Passing --config without a value causes Commander to throw a CommanderError
+      // with "option '--config <path>' argument missing".
+      process.argv = ['node', 'sparecrow', '--config'];
       const { run } = await import('./cli.js');
       await run();
       const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
@@ -309,6 +316,81 @@ describe('CLI Framework', () => {
         const parsed = JSON.parse(stdoutOutput) as { ok: boolean; error: { code: string } | null };
         expect(parsed.error?.code).not.toBe('CONFIG_INVALID');
       }
+    });
+
+    it('appends doctor hint for AUTH_TOKEN_EXPIRED error in non-JSON mode', async () => {
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
+      vi.doMock('./commands/status.js', () => ({
+        registerStatus: (prog: {
+          command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
+        }) => {
+          prog.command('status').action(async () => {
+            throw new ScrowError(ErrorCode.AUTH_TOKEN_EXPIRED, 'token expired');
+          });
+        },
+      }));
+      process.argv = ['node', 'sparecrow', 'status'];
+      const { run } = await import('./cli.js');
+      await run();
+      const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
+      expect(errOutput).toContain('Run `sparecrow doctor` for a full diagnostic report.');
+      expect(process.exit).toHaveBeenCalledWith(3);
+    });
+
+    it('suppresses doctor hint for AUTH_TOKEN_EXPIRED in --json mode', async () => {
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
+      vi.doMock('./commands/status.js', () => ({
+        registerStatus: (prog: {
+          command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
+        }) => {
+          prog.command('status').action(async () => {
+            throw new ScrowError(ErrorCode.AUTH_TOKEN_EXPIRED, 'token expired');
+          });
+        },
+      }));
+      process.argv = ['node', 'sparecrow', '--json', 'status'];
+      const { run } = await import('./cli.js');
+      await run();
+      const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
+      const stdoutOutput = vi.mocked(process.stdout.write).mock.calls.flat().join('');
+      expect(errOutput).not.toContain('sparecrow doctor');
+      expect(stdoutOutput).not.toContain('sparecrow doctor');
+    });
+
+    it('suppresses doctor hint for unexpected error in --json mode', async () => {
+      vi.doMock('./commands/status.js', () => ({
+        registerStatus: (prog: {
+          command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
+        }) => {
+          prog.command('status').action(async () => {
+            throw new Error('unexpected crash');
+          });
+        },
+      }));
+      process.argv = ['node', 'sparecrow', '--json', 'status'];
+      const { run } = await import('./cli.js');
+      await run();
+      const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
+      expect(errOutput).not.toContain('sparecrow doctor');
+    });
+
+    it('appends doctor hint for DAEMON_NOT_RUNNING error in non-JSON mode', async () => {
+      const { ScrowError, ErrorCode } = await import('../errors/index.js');
+      vi.doMock('./commands/status.js', () => ({
+        registerStatus: (prog: {
+          command: (name: string) => { action: (fn: () => Promise<void>) => unknown };
+        }) => {
+          prog.command('status').action(async () => {
+            throw new ScrowError(ErrorCode.DAEMON_NOT_RUNNING, 'daemon not running');
+          });
+        },
+      }));
+      process.argv = ['node', 'sparecrow', 'status'];
+      const { run } = await import('./cli.js');
+      await run();
+      const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
+      // Focus: hint is present (exit code already verified in separate test above)
+      expect(errOutput).toContain('Run `sparecrow doctor` for a full diagnostic report.');
     });
   });
 });

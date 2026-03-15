@@ -51,6 +51,36 @@ export function nextCustomIndex(tasks: ReadonlyArray<{ name: string }>): number 
   return max + 1;
 }
 
+/**
+ * Valid task status transitions. Terminal states (done, failed, skipped) have no outgoing transitions.
+ * Note: in-progress -> pending is handled by resetInProgressTasks() which bypasses setTaskStatus().
+ * Note: Self-transitions (e.g. pending -> pending) are not listed and will be rejected as invalid.
+ */
+export const VALID_TRANSITIONS: Readonly<Record<TaskStatus, ReadonlySet<TaskStatus>>> = {
+  pending: new Set<TaskStatus>(['in-progress', 'skipped']),
+  'in-progress': new Set<TaskStatus>(['done', 'failed', 'failed_quota']),
+  failed_quota: new Set<TaskStatus>(['in-progress', 'pending']),
+  done: new Set<TaskStatus>(),
+  failed: new Set<TaskStatus>(),
+  skipped: new Set<TaskStatus>(),
+};
+
+/** Throws QUEUE_INVALID_TRANSITION if the from -> to status transition is not allowed. */
+function assertValidTransition(from: TaskStatus, to: TaskStatus): void {
+  const allowed = VALID_TRANSITIONS[from];
+  if (!allowed.has(to)) {
+    const validTargets = [...allowed];
+    const hint =
+      validTargets.length > 0
+        ? ` Valid targets from '${from}': ${validTargets.join(', ')}`
+        : ` '${from}' is a terminal state with no valid outgoing transitions.`;
+    throw new ScrowError(
+      ErrorCode.QUEUE_INVALID_TRANSITION,
+      `Invalid task status transition: ${from} -> ${to}.${hint}`,
+    );
+  }
+}
+
 /** Throws QUEUE_INVALID_POSITION if position is not a valid 1-based queue index. */
 function assertValidPosition(position: number, queueLength: number): void {
   if (!Number.isInteger(position) || position < 1 || position > queueLength) {
@@ -193,10 +223,17 @@ export class QueueManager implements QueueDispatchPort {
         throw new ScrowError(ErrorCode.QUEUE_TASK_NOT_FOUND, `Task not found in queue: ${taskId}`);
       }
 
-      let updated = tasks.map((task, index) => (index === taskIndex ? { ...task, status } : task));
+      assertValidTransition(tasks[taskIndex]!.status, status);
+
+      const isTerminal = status === 'done' || status === 'failed' || status === 'skipped';
+      let updated = tasks.map((task, index) =>
+        index === taskIndex
+          ? { ...task, status, ...(isTerminal ? { completedAt: new Date() } : {}) }
+          : task,
+      );
 
       // Story 10.12 AC5: Auto-purge historical entries when transitioning to a terminal state
-      if (status === 'done' || status === 'failed' || status === 'skipped') {
+      if (isTerminal) {
         updated = QueueManager._pruneHistory(updated);
       }
 

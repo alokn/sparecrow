@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { Command } from 'commander';
 import { QueueStore } from '../../queue/index.js';
 import { QueueManager } from '../../queue/index.js';
+import { transitionTo } from '../../queue/queue-test-helpers.js';
 import { ErrorCode } from '../../errors/index.js';
 import * as actualTemplates from '../../templates/index.js';
 
@@ -179,7 +180,7 @@ describe('registerQueue() — human mode (non-interactive)', () => {
       prompt: 'p-bh',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(result.task.id, 'failed');
+    await transitionTo(mgr, result.task.id, 'failed');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -214,8 +215,8 @@ describe('registerQueue() — human mode (non-interactive)', () => {
       targetPath: dataDir,
     });
     // Set mixed statuses — third task stays 'pending' (default)
-    await mgr.setTaskStatus(r1.task.id, 'done');
-    await mgr.setTaskStatus(r2.task.id, 'failed');
+    await transitionTo(mgr, r1.task.id, 'done');
+    await transitionTo(mgr, r2.task.id, 'failed');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -260,6 +261,7 @@ describe('registerQueue() — human mode (non-interactive)', () => {
       prompt: 'p-bh',
       targetPath: dataDir,
     });
+    await mgr.setTaskStatus(result.task.id, 'in-progress');
     await mgr.setTaskStatus(result.task.id, 'failed_quota');
 
     const { registerQueue } = await import('./queue.js');
@@ -2854,8 +2856,15 @@ describe('registerQueue() — queue history command (human mode)', () => {
       prompt: 'p-bh',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'done');
-    await mgr.setTaskStatus(r2.task.id, 'failed');
+    const r3 = await mgr.add({
+      type: 'template',
+      templateName: 'security-audit',
+      prompt: 'p-sec',
+      targetPath: dataDir,
+    });
+    await transitionTo(mgr, r1.task.id, 'done');
+    await transitionTo(mgr, r2.task.id, 'failed');
+    await transitionTo(mgr, r3.task.id, 'skipped');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -2864,26 +2873,49 @@ describe('registerQueue() — queue history command (human mode)', () => {
     expect(stdoutOutput).toContain('HISTORY');
     expect(stdoutOutput).toContain('improve-code');
     expect(stdoutOutput).toContain('fix-bugs');
+    expect(stdoutOutput).toContain('security-audit');
     expect(stdoutOutput).toContain('\u2713'); // ✓ for done
     expect(stdoutOutput).toContain('\u2717'); // ✗ for failed
+    expect(stdoutOutput).toContain('\u2013'); // – for skipped
+    // AC2: execution time (completedAt) must appear — "Completed" column header + UTC timestamps
+    expect(stdoutOutput).toContain('Completed');
+    // The completedAt timestamp appears as "YYYY-MM-DD HH:MM:SS UTC" in the Completed column
+    expect(stdoutOutput).toContain('UTC');
   });
 
   it('does not show pending/in-progress/failed_quota tasks in history', async () => {
     const store = new QueueStore(dataDir);
     const mgr = new QueueManager(store);
+    // Seed one task in each excluded status
     await mgr.add({
       type: 'template',
       templateName: 'pending-task',
       prompt: 'p',
       targetPath: dataDir,
     });
+    const rInProgress = await mgr.add({
+      type: 'template',
+      templateName: 'in-progress-task',
+      prompt: 'p',
+      targetPath: dataDir,
+    });
+    await mgr.setTaskStatus(rInProgress.task.id, 'in-progress');
+    const rFailedQuota = await mgr.add({
+      type: 'template',
+      templateName: 'failed-quota-task',
+      prompt: 'p',
+      targetPath: dataDir,
+    });
+    await mgr.setTaskStatus(rFailedQuota.task.id, 'in-progress');
+    await mgr.setTaskStatus(rFailedQuota.task.id, 'failed_quota');
+    // Seed a done task that must appear in history
     const r2 = await mgr.add({
       type: 'template',
       templateName: 'done-task',
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r2.task.id, 'done');
+    await transitionTo(mgr, r2.task.id, 'done');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -2891,6 +2923,8 @@ describe('registerQueue() — queue history command (human mode)', () => {
     await program.parseAsync(['node', 'sparecrow', 'queue', 'history']);
     expect(stdoutOutput).toContain('done-task');
     expect(stdoutOutput).not.toContain('pending-task');
+    expect(stdoutOutput).not.toContain('in-progress-task');
+    expect(stdoutOutput).not.toContain('failed-quota-task');
   });
 
   it('renders failure sub-row for failed tasks when log-reader returns failures', async () => {
@@ -2902,7 +2936,7 @@ describe('registerQueue() — queue history command (human mode)', () => {
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'failed');
+    await transitionTo(mgr, r1.task.id, 'failed');
 
     vi.doMock('./log-reader.js', () => ({
       getRecentTaskFailures: async () => new Map([['broken-task', 'CLAUDE_NOT_FOUND']]),
@@ -2924,6 +2958,45 @@ describe('registerQueue() — queue history command (human mode)', () => {
     await program.parseAsync(['node', 'sparecrow', 'queue', 'history']);
     expect(stdoutOutput).toContain('Last failure:');
     expect(stdoutOutput).toContain('Claude CLI not found');
+  });
+
+  it('renders history table without failure annotations when getRecentTaskFailures throws', async () => {
+    // AC6 / finding: silent failure of getRecentTaskFailures (catch block) is covered;
+    // degraded mode still renders the history table without failure annotations
+    const store = new QueueStore(dataDir);
+    const mgr = new QueueManager(store);
+    const r1 = await mgr.add({
+      type: 'template',
+      templateName: 'some-task',
+      prompt: 'p',
+      targetPath: dataDir,
+    });
+    await transitionTo(mgr, r1.task.id, 'done');
+
+    vi.doMock('./log-reader.js', () => ({
+      getRecentTaskFailures: async () => {
+        throw new Error('log read error');
+      },
+      queryLogs: async () => ({
+        entries: [],
+        total: 0,
+        successCount: 0,
+        failureCount: 0,
+        failureSummary: [],
+      }),
+      parseSinceDuration: () => new Date(),
+      discoverLogFiles: async () => [],
+      parseLogFile: async () => [],
+    }));
+
+    const { registerQueue } = await import('./queue.js');
+    const program = makeProgram();
+    registerQueue(program);
+    await program.parseAsync(['node', 'sparecrow', 'queue', 'history']);
+    // History renders despite log-reader failure; no failure annotations appear
+    expect(stdoutOutput).toContain('HISTORY');
+    expect(stdoutOutput).toContain('some-task');
+    expect(stdoutOutput).not.toContain('Last failure:');
   });
 
   it('scrow alias routes to the same queue history behaviour', async () => {
@@ -2982,14 +3055,19 @@ describe('registerQueue() — queue history command (JSON mode)', () => {
     vi.restoreAllMocks();
   });
 
-  it('prints "No history." message when no history exists (even in JSON mode)', async () => {
+  it('returns JSON envelope with empty tasks array when no history exists in JSON mode', async () => {
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
     registerQueue(program);
     await program.parseAsync(['node', 'sparecrow', 'queue', 'history']);
 
-    // AC4: "No history." is shown for empty history regardless of --json mode
-    expect(stdoutOutput).toContain('No history.');
+    // AC4: JSON mode must return a valid envelope even for empty history (CLAUDE.md §8)
+    const parsed = parseJson(stdoutOutput);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.error).toBeNull();
+    expect(parsed.data).not.toBeNull();
+    const data = parsed.data as { tasks: unknown[] };
+    expect(data.tasks).toHaveLength(0);
   });
 
   it('returns JSON envelope with historical tasks including lastFailure field', async () => {
@@ -3001,7 +3079,7 @@ describe('registerQueue() — queue history command (JSON mode)', () => {
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'done');
+    await transitionTo(mgr, r1.task.id, 'done');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -3010,6 +3088,7 @@ describe('registerQueue() — queue history command (JSON mode)', () => {
 
     const parsed = parseJson(stdoutOutput);
     expect(parsed.ok).toBe(true);
+    expect(parsed.error).toBeNull();
     const data = parsed.data as {
       tasks: Array<{
         name: string;
@@ -3084,7 +3163,7 @@ describe('registerQueue() — --include-history flag (Story 10.12)', () => {
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'done');
+    await transitionTo(mgr, r1.task.id, 'done');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -3177,7 +3256,7 @@ describe('registerQueue() — --include-history JSON mode (Story 10.12)', () => 
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'done');
+    await transitionTo(mgr, r1.task.id, 'done');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -3207,7 +3286,7 @@ describe('registerQueue() — --include-history JSON mode (Story 10.12)', () => 
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'done');
+    await transitionTo(mgr, r1.task.id, 'done');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();
@@ -3284,7 +3363,7 @@ describe('registerQueue() — empty live queue with history (Story 10.12)', () =
       prompt: 'p',
       targetPath: dataDir,
     });
-    await mgr.setTaskStatus(r1.task.id, 'done');
+    await transitionTo(mgr, r1.task.id, 'done');
 
     const { registerQueue } = await import('./queue.js');
     const program = makeProgram();

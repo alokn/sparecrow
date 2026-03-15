@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { runCli, seedConfig } from '../helpers/index.js';
+import { runCli, seedConfig, seedQueue } from '../helpers/index.js';
+import type { PersistedTask } from '../helpers/index.js';
 
 interface JsonEnvelope {
   ok: boolean;
@@ -45,10 +46,10 @@ function assertJsonEnvelope(raw: string): JsonEnvelope {
   return parsed as JsonEnvelope;
 }
 
-// [AI-Review][High] Include PATH from the current process so that `git` and `node` are
-// always available regardless of the test execution environment. Other E2E suites (03, 04)
-// explicitly pass NODE_BIN_DIR to guarantee deterministic PATH resolution; here we propagate
-// the inherited PATH so that validateRepository → git rev-parse works consistently.
+// Propagate the inherited PATH so that `git` and `node` are always available regardless
+// of the test execution environment. Unlike suites 03/04 which additionally pass
+// NODE_BIN_DIR for deterministic node resolution, this suite relies solely on PATH
+// inheritance — sufficient for commands that do not spawn child node processes.
 function baseEnv(dir: string): Record<string, string> {
   return {
     HOME: dir,
@@ -70,6 +71,8 @@ const EXIT_0_COMMANDS: [string, string[]][] = [
   ['--json config', ['--json', 'config']],
   ['--json templates', ['--json', 'templates']],
   ['--json logs', ['--json', 'logs']],
+  ['--json report', ['--json', 'report']],
+  ['--json queue history', ['--json', 'queue', 'history']],
 ];
 
 describe('JSON envelope and exit code contracts (suite 10)', () => {
@@ -380,6 +383,307 @@ describe('JSON envelope and exit code contracts (suite 10)', () => {
 
       expect(result.exitCode).toBe(0);
       assertJsonEnvelope(result.stdout);
+    });
+  });
+
+  // ── Story 20.6: Missing JSON E2E envelope tests ──────────────────────────
+
+  // AC1: report --json returns valid JSON envelope
+  it('report --json returns valid envelope with report data (story 20.6 AC1)', () => {
+    const result = runCli(['--json', 'report'], baseEnv(homeDir));
+
+    expect(result.exitCode).toBe(0);
+
+    const parsed = assertJsonEnvelope(result.stdout);
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.error).toBeNull();
+
+    // With no audit logs, report returns insufficientData: true
+    const data = parsed.data as Record<string, unknown>;
+    expect(typeof data['periodStart']).toBe('string');
+    expect(typeof data['periodEnd']).toBe('string');
+    expect(typeof data['tasksCompleted']).toBe('number');
+    expect(typeof data['insufficientData']).toBe('boolean');
+    expect(Array.isArray(data['breakdownByTaskType'])).toBe(true);
+  });
+
+  // AC2: queue list --json with seeded tasks returns tasks array
+  describe('queue list --json with seeded tasks (story 20.6 AC2)', () => {
+    it('returns valid envelope with tasks array containing seeded items', async () => {
+      const tasks: PersistedTask[] = [
+        {
+          id: 'a0000000-0000-4000-8000-000000000001',
+          name: 'test-task-1',
+          type: 'custom',
+          status: 'pending',
+          prompt: 'test prompt 1',
+          targetPath: '/tmp/repo1',
+          priority: 1,
+          createdAt: new Date().toISOString(),
+          timeoutMs: 3600000,
+          actions: [],
+        },
+        {
+          id: 'a0000000-0000-4000-8000-000000000002',
+          name: 'test-task-2',
+          type: 'custom',
+          status: 'pending',
+          prompt: 'test prompt 2',
+          targetPath: '/tmp/repo2',
+          priority: 2,
+          createdAt: new Date().toISOString(),
+          timeoutMs: 3600000,
+          actions: [],
+        },
+      ];
+
+      await seedQueue(homeDir, tasks);
+
+      const result = runCli(['--json', 'queue', 'list'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(Array.isArray(data['tasks'])).toBe(true);
+      const taskList = data['tasks'] as Array<Record<string, unknown>>;
+      expect(taskList.length).toBe(2);
+
+      // Verify complete task shape per CLAUDE.md Data Format Rules (all fields always present)
+      for (const task of taskList) {
+        expect(typeof task['id']).toBe('string');
+        expect(typeof task['name']).toBe('string');
+        expect(typeof task['status']).toBe('string');
+        expect(typeof task['targetPath']).toBe('string');
+        expect(typeof task['priority']).toBe('number');
+        // lastFailure is always present: null when no failure, object with code+message otherwise
+        expect('lastFailure' in task).toBe(true);
+        const lastFailure = task['lastFailure'];
+        expect(
+          lastFailure === null || (typeof lastFailure === 'object' && lastFailure !== null),
+        ).toBe(true);
+      }
+    });
+  });
+
+  // AC3: queue reorder --json returns valid JSON envelope
+  describe('queue reorder --json (story 20.6 AC3)', () => {
+    it('returns valid envelope after moving task position', async () => {
+      const tasks: PersistedTask[] = [
+        {
+          id: 'a0000000-0000-4000-8000-000000000003',
+          name: 'reorder-task-1',
+          type: 'custom',
+          status: 'pending',
+          prompt: 'prompt 1',
+          targetPath: '/tmp/repo1',
+          priority: 1,
+          createdAt: new Date().toISOString(),
+          timeoutMs: 3600000,
+          actions: [],
+        },
+        {
+          id: 'a0000000-0000-4000-8000-000000000004',
+          name: 'reorder-task-2',
+          type: 'custom',
+          status: 'pending',
+          prompt: 'prompt 2',
+          targetPath: '/tmp/repo2',
+          priority: 2,
+          createdAt: new Date().toISOString(),
+          timeoutMs: 3600000,
+          actions: [],
+        },
+      ];
+
+      await seedQueue(homeDir, tasks);
+
+      const result = runCli(['--json', 'queue', 'reorder', 'move', '1', '2'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(Array.isArray(data['tasks'])).toBe(true);
+      // Both tasks must survive the reorder operation
+      expect((data['tasks'] as unknown[]).length).toBe(2);
+    });
+  });
+
+  // AC4: refresh --json returns valid JSON envelope
+  // Note: seedConfig IS called in beforeEach, so a config file exists. The actual failure
+  // point is createProvider → auth-manager.ts throwing AUTH_TOKEN_MISSING, because no
+  // OAuth token is stored in the test home directory. AUTH_TOKEN_MISSING is in
+  // AUTH_CONFIG_CODES, so the global error handler maps it to exit code 3 (EXIT.AUTH_OR_CONFIG).
+  // The happy-path JSON envelope (ok: true from refresh.ts:132) requires valid auth
+  // credentials which cannot be seeded in E2E; it is documented as a known gap and
+  // tested via unit tests in refresh.test.ts.
+  it('refresh --json returns valid JSON error envelope (story 20.6 AC4)', () => {
+    const result = runCli(['--json', 'refresh'], baseEnv(homeDir));
+
+    // Refresh fails without valid auth — exact exit code varies by environment
+    // (AUTH_TOKEN_MISSING → exit 3 on some systems, exit 1 on others in CI)
+    expect(result.exitCode).not.toBe(0);
+
+    const parsed = assertJsonEnvelope(result.stdout);
+
+    // Error envelope: ok: false, data: null, error non-null with string code and message.
+    // The specific error code varies by environment (AUTH_TOKEN_MISSING locally,
+    // PROVIDER_UNREACHABLE in CI where network calls fail before auth check).
+    expect(parsed.ok).toBe(false);
+    expect(parsed.data).toBeNull();
+    expect(parsed.error).not.toBeNull();
+    const error = parsed.error as { code: string; message: string };
+    expect(typeof error.code).toBe('string');
+    expect(error.code.length).toBeGreaterThan(0);
+    expect(typeof error.message).toBe('string');
+    expect(error.message.length).toBeGreaterThan(0);
+  });
+
+  // AC5: queue history --json returns valid JSON envelope
+  describe('queue history --json (story 20.6 AC5)', () => {
+    it('returns valid envelope with empty tasks when no history', () => {
+      const result = runCli(['--json', 'queue', 'history'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(Array.isArray(data['tasks'])).toBe(true);
+      expect((data['tasks'] as unknown[]).length).toBe(0);
+    });
+
+    it('returns valid envelope with completed tasks', async () => {
+      const tasks: PersistedTask[] = [
+        {
+          id: 'a0000000-0000-4000-8000-000000000005',
+          name: 'completed-task-1',
+          type: 'template',
+          templateName: 'code-review',
+          status: 'done',
+          prompt: 'review code',
+          targetPath: '/tmp/repo1',
+          priority: 1,
+          createdAt: '2026-03-01T10:00:00.000Z',
+          completedAt: '2026-03-01T10:30:00.000Z',
+          timeoutMs: 3600000,
+          actions: [],
+        },
+        {
+          id: 'a0000000-0000-4000-8000-000000000006',
+          name: 'failed-task-1',
+          type: 'custom',
+          status: 'failed',
+          prompt: 'fix bugs',
+          targetPath: '/tmp/repo2',
+          priority: 2,
+          createdAt: '2026-03-01T11:00:00.000Z',
+          completedAt: '2026-03-01T11:30:00.000Z',
+          timeoutMs: 3600000,
+          actions: [],
+        },
+      ];
+
+      await seedQueue(homeDir, tasks);
+
+      const result = runCli(['--json', 'queue', 'history'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(Array.isArray(data['tasks'])).toBe(true);
+      const taskList = data['tasks'] as Array<Record<string, unknown>>;
+      expect(taskList.length).toBe(2);
+
+      // Verify complete task shape per CLAUDE.md Data Format Rules (all fields always present)
+      for (const task of taskList) {
+        expect(typeof task['id']).toBe('string');
+        expect(typeof task['name']).toBe('string');
+        expect(typeof task['status']).toBe('string');
+        expect(['done', 'failed', 'skipped']).toContain(task['status']);
+        expect(typeof task['priority']).toBe('number');
+        // lastFailure is always present: null when no failure, object with code+message otherwise
+        expect('lastFailure' in task).toBe(true);
+        const lastFailure = task['lastFailure'];
+        expect(
+          lastFailure === null || (typeof lastFailure === 'object' && lastFailure !== null),
+        ).toBe(true);
+      }
+    });
+  });
+
+  // AC6: completions --json
+  // The completions command now checks isJsonMode() and emits a { ok, data, error } JSON
+  // envelope wrapping the shell script in data.script. This satisfies AC6's requirement
+  // that "--json completions <shell>" outputs a valid JSON envelope.
+  describe('completions --json (story 20.6 AC6)', () => {
+    it('exits 0 with --json flag and returns JSON envelope with shell script (bash)', () => {
+      const result = runCli(['--json', 'completions', 'bash'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(data['shell']).toBe('bash');
+      expect(typeof data['script']).toBe('string');
+      expect((data['script'] as string).length).toBeGreaterThan(0);
+      expect(data['script']).toContain('sparecrow');
+    });
+
+    it('exits 0 with --json flag and returns JSON envelope with shell script (zsh)', () => {
+      const result = runCli(['--json', 'completions', 'zsh'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(data['shell']).toBe('zsh');
+      expect(typeof data['script']).toBe('string');
+      expect((data['script'] as string).length).toBeGreaterThan(0);
+      expect(data['script']).toContain('sparecrow');
+    });
+
+    it('exits 0 with --json flag and returns JSON envelope with shell script (fish)', () => {
+      const result = runCli(['--json', 'completions', 'fish'], baseEnv(homeDir));
+
+      expect(result.exitCode).toBe(0);
+
+      const parsed = assertJsonEnvelope(result.stdout);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.error).toBeNull();
+
+      const data = parsed.data as Record<string, unknown>;
+      expect(data['shell']).toBe('fish');
+      expect(typeof data['script']).toBe('string');
+      expect((data['script'] as string).length).toBeGreaterThan(0);
+      expect(data['script']).toContain('sparecrow');
     });
   });
 });

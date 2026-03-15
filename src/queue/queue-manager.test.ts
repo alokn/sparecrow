@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { QueueStore } from './queue-store.js';
-import { QueueManager } from './queue-manager.js';
+import { QueueManager, VALID_TRANSITIONS } from './queue-manager.js';
+import { transitionTo } from './queue-test-helpers.js';
 import { ScrowError, ErrorCode } from '../errors/index.js';
 
 function makeTmpDir(): string {
@@ -71,8 +72,9 @@ describe('QueueManager', () => {
         targetPath: '/c',
       });
 
+      await manager.setTaskStatus(second.task.id, 'in-progress');
       await manager.setTaskStatus(second.task.id, 'failed_quota');
-      await manager.setTaskStatus(third.task.id, 'done');
+      await transitionTo(manager, third.task.id, 'done');
 
       const tasks = await manager.listDispatchable();
       expect(tasks.map((task) => task.id)).toEqual([first.task.id, second.task.id]);
@@ -87,7 +89,7 @@ describe('QueueManager', () => {
         prompt: '',
         targetPath: '/a',
       });
-      await manager.setTaskStatus(first.task.id, 'done');
+      await transitionTo(manager, first.task.id, 'done');
 
       const tasks = await manager.listDispatchable();
       expect(tasks).toEqual([]);
@@ -121,10 +123,10 @@ describe('QueueManager', () => {
         targetPath: '/a',
       });
 
-      await manager.setTaskStatus(added.task.id, 'failed');
+      await manager.setTaskStatus(added.task.id, 'in-progress');
 
       const tasks = await manager.list();
-      expect(tasks[0]!.status).toBe('failed');
+      expect(tasks[0]!.status).toBe('in-progress');
     });
 
     it('throws QUEUE_TASK_NOT_FOUND when task id is not found', async () => {
@@ -250,6 +252,7 @@ describe('QueueManager', () => {
         targetPath: '/a',
       });
       await manager.pause();
+      await manager.setTaskStatus(added.task.id, 'in-progress');
       await manager.setTaskStatus(added.task.id, 'done');
       expect(await manager.isPaused()).toBe(true);
     });
@@ -644,9 +647,9 @@ describe('QueueManager', () => {
         targetPath: '/c',
       });
 
-      await manager.setTaskStatus(t1.task.id, 'done');
+      await transitionTo(manager, t1.task.id, 'done');
       await manager.setTaskStatus(t2.task.id, 'in-progress');
-      await manager.setTaskStatus(t3.task.id, 'failed');
+      await transitionTo(manager, t3.task.id, 'failed');
 
       const count = await manager.resetInProgressTasks();
 
@@ -738,7 +741,8 @@ describe('QueueManager', () => {
         targetPath: '/c',
       });
 
-      await manager.setTaskStatus(t1.task.id, 'done');
+      await transitionTo(manager, t1.task.id, 'done');
+      await manager.setTaskStatus(t2.task.id, 'in-progress');
       await manager.setTaskStatus(t2.task.id, 'failed_quota');
 
       // 1 pending + 1 failed_quota = 2 dispatchable; 0 in-progress
@@ -768,7 +772,7 @@ describe('QueueManager', () => {
       });
 
       await manager.setTaskStatus(t1.task.id, 'in-progress');
-      await manager.setTaskStatus(t2.task.id, 'done');
+      await transitionTo(manager, t2.task.id, 'done');
 
       // 1 pending + 1 in-progress = 2 total workload
       const count = await manager.countWorkload();
@@ -790,8 +794,8 @@ describe('QueueManager', () => {
         targetPath: '/b',
       });
 
-      await manager.setTaskStatus(t1.task.id, 'done');
-      await manager.setTaskStatus(t2.task.id, 'failed');
+      await transitionTo(manager, t1.task.id, 'done');
+      await transitionTo(manager, t2.task.id, 'failed');
 
       const count = await manager.countWorkload();
 
@@ -820,6 +824,7 @@ describe('QueueManager', () => {
       });
 
       // Simulate: t1 was failed_quota, then re-dispatched and set to in-progress before crash
+      await manager.setTaskStatus(t1.task.id, 'in-progress');
       await manager.setTaskStatus(t1.task.id, 'failed_quota');
       await manager.setTaskStatus(t1.task.id, 'in-progress');
       // t2 is actively in-progress from a normal dispatch
@@ -850,9 +855,9 @@ describe('QueueManager', () => {
         });
         ids.push(result.task.id);
       }
-      // Set all to 'done' — pruneHistory will fire on each transition
+      // Set all to 'done' via valid transition path — pruneHistory will fire on each transition
       for (const id of ids) {
-        await manager.setTaskStatus(id, 'done');
+        await transitionTo(manager, id, 'done');
       }
 
       const tasks = await manager.list();
@@ -876,7 +881,7 @@ describe('QueueManager', () => {
       }
       // Set 51 to done, leave last one as pending
       for (let i = 0; i < 51; i++) {
-        await manager.setTaskStatus(ids[i]!, 'done');
+        await transitionTo(manager, ids[i]!, 'done');
       }
 
       const tasks = await manager.list();
@@ -900,7 +905,7 @@ describe('QueueManager', () => {
         ids.push(result.task.id);
       }
       for (const id of ids) {
-        await manager.setTaskStatus(id, 'done');
+        await transitionTo(manager, id, 'done');
       }
 
       const tasks = await manager.list();
@@ -915,7 +920,7 @@ describe('QueueManager', () => {
         prompt: '',
         targetPath: '/a',
       });
-      await manager.setTaskStatus(result.task.id, 'done');
+      await transitionTo(manager, result.task.id, 'done');
 
       const tasks = await manager.list();
       expect(tasks.length).toBe(1);
@@ -929,6 +934,7 @@ describe('QueueManager', () => {
         prompt: '',
         targetPath: '/a',
       });
+      await manager.setTaskStatus(result.task.id, 'in-progress');
       // Spy on _pruneHistory to verify it's called
       const spy = vi.spyOn(QueueManager, '_pruneHistory' as never);
       await manager.setTaskStatus(result.task.id, 'done');
@@ -942,6 +948,7 @@ describe('QueueManager', () => {
         prompt: '',
         targetPath: '/a',
       });
+      await manager.setTaskStatus(result.task.id, 'in-progress');
       const spy = vi.spyOn(QueueManager, '_pruneHistory' as never);
       await manager.setTaskStatus(result.task.id, 'failed');
       expect(spy).toHaveBeenCalled();
@@ -959,7 +966,7 @@ describe('QueueManager', () => {
       expect(spy).toHaveBeenCalled();
     });
 
-    it('is NOT called when transitioning to pending', async () => {
+    it('is NOT called when transitioning to pending (from failed_quota)', async () => {
       const result = await manager.add({
         type: 'template',
         templateName: 'lint',
@@ -967,6 +974,7 @@ describe('QueueManager', () => {
         targetPath: '/a',
       });
       await manager.setTaskStatus(result.task.id, 'in-progress');
+      await manager.setTaskStatus(result.task.id, 'failed_quota');
       const spy = vi.spyOn(QueueManager, '_pruneHistory' as never);
       await manager.setTaskStatus(result.task.id, 'pending');
       expect(spy).not.toHaveBeenCalled();
@@ -991,6 +999,7 @@ describe('QueueManager', () => {
         prompt: '',
         targetPath: '/a',
       });
+      await manager.setTaskStatus(result.task.id, 'in-progress');
       const spy = vi.spyOn(QueueManager, '_pruneHistory' as never);
       await manager.setTaskStatus(result.task.id, 'failed_quota');
       expect(spy).not.toHaveBeenCalled();
@@ -1073,8 +1082,8 @@ describe('QueueManager', () => {
         targetPath: '/c',
       });
 
-      await manager.setTaskStatus(t1.task.id, 'done');
-      await manager.setTaskStatus(t2.task.id, 'done');
+      await transitionTo(manager, t1.task.id, 'done');
+      await transitionTo(manager, t2.task.id, 'done');
 
       // removeById targets the correct task even when historical tasks precede it
       const removed = await manager.removeById(t3.task.id);
@@ -1182,9 +1191,9 @@ describe('QueueManager', () => {
         ids.push(result.task.id);
         names.push(result.task.name);
       }
-      // Set all to 'done' — oldest are task-00, task-01
+      // Set all to 'done' via valid transitions — oldest are task-00, task-01
       for (const id of ids) {
-        await manager.setTaskStatus(id, 'done');
+        await transitionTo(manager, id, 'done');
       }
 
       const tasks = await manager.list();
@@ -1196,6 +1205,339 @@ describe('QueueManager', () => {
       // The newest should still be present
       expect(remaining).toContain('task-51');
       expect(remaining).toContain('task-50');
+    });
+  });
+
+  // ── task lifecycle state machine validation (Story 20.4) ──────────────
+
+  describe('task lifecycle state machine validation', () => {
+    // AC1: done -> in-progress rejected
+    it('rejects done -> in-progress transition', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await transitionTo(manager, result.task.id, 'done');
+
+      await expect(manager.setTaskStatus(result.task.id, 'in-progress')).rejects.toMatchObject({
+        code: ErrorCode.QUEUE_INVALID_TRANSITION,
+      });
+    });
+
+    // AC2: done -> pending rejected
+    it('rejects done -> pending transition', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await transitionTo(manager, result.task.id, 'done');
+
+      await expect(manager.setTaskStatus(result.task.id, 'pending')).rejects.toMatchObject({
+        code: ErrorCode.QUEUE_INVALID_TRANSITION,
+      });
+    });
+
+    // AC3: skipped -> in-progress rejected
+    it('rejects skipped -> in-progress transition', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await manager.setTaskStatus(result.task.id, 'skipped');
+
+      await expect(manager.setTaskStatus(result.task.id, 'in-progress')).rejects.toMatchObject({
+        code: ErrorCode.QUEUE_INVALID_TRANSITION,
+      });
+    });
+
+    // AC4: all valid transitions succeed
+    describe('valid transitions succeed', () => {
+      it('allows pending -> in-progress', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('in-progress');
+      });
+
+      it('allows pending -> skipped', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'skipped');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('skipped');
+      });
+
+      it('allows in-progress -> done', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        await manager.setTaskStatus(result.task.id, 'done');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('done');
+      });
+
+      it('allows in-progress -> failed', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        await manager.setTaskStatus(result.task.id, 'failed');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('failed');
+      });
+
+      it('allows in-progress -> failed_quota', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        await manager.setTaskStatus(result.task.id, 'failed_quota');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('failed_quota');
+      });
+
+      it('allows failed_quota -> in-progress (re-dispatch)', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        await manager.setTaskStatus(result.task.id, 'failed_quota');
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('in-progress');
+      });
+
+      it('allows failed_quota -> pending (manual reset)', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await manager.setTaskStatus(result.task.id, 'in-progress');
+        await manager.setTaskStatus(result.task.id, 'failed_quota');
+        await manager.setTaskStatus(result.task.id, 'pending');
+        const tasks = await manager.list();
+        const task = tasks.find((t) => t.id === result.task.id)!;
+        expect(task.status).toBe('pending');
+      });
+    });
+
+    // AC5: complete transition matrix as table-driven test
+    // Uses the exported VALID_TRANSITIONS production constant as the oracle so that
+    // any future change to the production map is automatically reflected in these tests.
+    describe('complete transition matrix', () => {
+      const ALL_STATUSES: Array<
+        'pending' | 'in-progress' | 'done' | 'failed' | 'failed_quota' | 'skipped'
+      > = ['pending', 'in-progress', 'done', 'failed', 'failed_quota', 'skipped'];
+
+      /** Puts a freshly-added task into the desired fromStatus via valid intermediate transitions.
+       *  Uses a fresh manager instance per call to avoid task accumulation across matrix iterations. */
+      async function setupTaskInStatus(mgr: QueueManager, fromStatus: string): Promise<string> {
+        const result = await mgr.add({
+          type: 'template',
+          templateName: 'matrix-test',
+          prompt: '',
+          targetPath: '/a',
+        });
+        const taskId = result.task.id;
+
+        // Navigate to fromStatus via valid paths
+        switch (fromStatus) {
+          case 'pending':
+            // Already pending
+            break;
+          case 'in-progress':
+            await mgr.setTaskStatus(taskId, 'in-progress');
+            break;
+          case 'done':
+            await mgr.setTaskStatus(taskId, 'in-progress');
+            await mgr.setTaskStatus(taskId, 'done');
+            break;
+          case 'failed':
+            await mgr.setTaskStatus(taskId, 'in-progress');
+            await mgr.setTaskStatus(taskId, 'failed');
+            break;
+          case 'failed_quota':
+            await mgr.setTaskStatus(taskId, 'in-progress');
+            await mgr.setTaskStatus(taskId, 'failed_quota');
+            break;
+          case 'skipped':
+            await mgr.setTaskStatus(taskId, 'skipped');
+            break;
+        }
+        return taskId;
+      }
+
+      // Self-transitions (e.g. pending -> pending) are rejected as invalid because no status
+      // appears in its own outgoing set in VALID_TRANSITIONS. This is intentional and documented.
+      for (const from of ALL_STATUSES) {
+        for (const to of ALL_STATUSES) {
+          if (from === to) continue; // self-transitions are rejected; covered by separate test
+          const isValid = VALID_TRANSITIONS[from]!.has(to);
+          const label = isValid ? 'allows' : 'rejects';
+
+          it(`${label} ${from} -> ${to}`, async () => {
+            // Use a fresh store+manager per cell to avoid accumulating tasks beyond HISTORY_CAP
+            const cellDir = makeTmpDir();
+            await mkdir(cellDir, { recursive: true });
+            const cellStore = new QueueStore(cellDir);
+            const cellManager = new QueueManager(cellStore);
+
+            try {
+              const taskId = await setupTaskInStatus(cellManager, from);
+
+              if (isValid) {
+                await expect(cellManager.setTaskStatus(taskId, to)).resolves.toBeUndefined();
+              } else {
+                await expect(cellManager.setTaskStatus(taskId, to)).rejects.toMatchObject({
+                  code: ErrorCode.QUEUE_INVALID_TRANSITION,
+                });
+              }
+            } finally {
+              await rm(cellDir, { recursive: true, force: true });
+            }
+          });
+        }
+      }
+
+      it('rejects self-transition pending -> pending', async () => {
+        const result = await manager.add({
+          type: 'template',
+          templateName: 'lint',
+          prompt: '',
+          targetPath: '/a',
+        });
+        await expect(manager.setTaskStatus(result.task.id, 'pending')).rejects.toMatchObject({
+          code: ErrorCode.QUEUE_INVALID_TRANSITION,
+        });
+      });
+    });
+
+    it('preserves task status when transition is rejected', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await transitionTo(manager, result.task.id, 'done');
+
+      // Attempt invalid transition
+      await expect(manager.setTaskStatus(result.task.id, 'pending')).rejects.toMatchObject({
+        code: ErrorCode.QUEUE_INVALID_TRANSITION,
+      });
+
+      // Status unchanged
+      const tasks = await manager.list();
+      expect(tasks[0]!.status).toBe('done');
+    });
+
+    it('includes from and to status in error message', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await transitionTo(manager, result.task.id, 'done');
+
+      await expect(manager.setTaskStatus(result.task.id, 'in-progress')).rejects.toMatchObject({
+        message: expect.stringContaining('done -> in-progress'),
+      });
+    });
+
+    it('error message lists valid target statuses for non-terminal from state', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+
+      await expect(manager.setTaskStatus(result.task.id, 'done')).rejects.toMatchObject({
+        message: expect.stringContaining('in-progress'),
+      });
+    });
+
+    it('error message indicates terminal state has no valid outgoing transitions', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await transitionTo(manager, result.task.id, 'done');
+
+      await expect(manager.setTaskStatus(result.task.id, 'pending')).rejects.toMatchObject({
+        message: expect.stringContaining('terminal state'),
+      });
+    });
+
+    it('does not set completedAt when transitioning to failed_quota', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await manager.setTaskStatus(result.task.id, 'in-progress');
+      await manager.setTaskStatus(result.task.id, 'failed_quota');
+
+      const tasks = await manager.list();
+      const task = tasks.find((t) => t.id === result.task.id)!;
+      expect(task.status).toBe('failed_quota');
+      // failed_quota is NOT a terminal state, so completedAt must not be set
+      expect(task.completedAt).toBeUndefined();
+    });
+
+    it('sets completedAt when transitioning to terminal state done', async () => {
+      const result = await manager.add({
+        type: 'template',
+        templateName: 'lint',
+        prompt: '',
+        targetPath: '/a',
+      });
+      await transitionTo(manager, result.task.id, 'done');
+
+      const tasks = await manager.list();
+      const task = tasks.find((t) => t.id === result.task.id)!;
+      expect(task.status).toBe('done');
+      expect(task.completedAt).toBeInstanceOf(Date);
     });
   });
 

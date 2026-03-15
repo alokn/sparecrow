@@ -1,5 +1,8 @@
 /** Shell completion script generator for bash, zsh, and fish. */
 import type { Command } from 'commander';
+import { isJsonMode } from '../index.js';
+import { printJson } from '../../ui/index.js';
+import { jsonOk } from '../../types/index.js';
 
 function buildBashCompletion(commandNames: string[]): string {
   const commandList = commandNames.join(' ');
@@ -52,6 +55,13 @@ export function registerCompletions(program: Command): void {
       } else {
         process.stderr.write(`Unknown shell '${shell}'. Supported: bash, zsh, fish\n`);
         process.exit(1);
+        return;
+      }
+
+      // When --json is passed, emit a JSON envelope wrapping the completion script.
+      // This satisfies AC6: the output is a valid { ok, data, error } envelope.
+      if (isJsonMode()) {
+        printJson(jsonOk({ shell, script }));
         return;
       }
       process.stdout.write(script + '\n');

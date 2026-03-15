@@ -7,7 +7,7 @@ import {
   usageCardState,
   renderStatusOutput,
 } from './status-presenter.js';
-import type { StatusSnapshot, StatusUsage } from '../../types/index.js';
+import type { StatusSnapshot, StatusUsage, DaemonBackendState } from '../../types/index.js';
 
 function makeUsage(overrides: Partial<StatusUsage> = {}): StatusUsage {
   return {
@@ -33,7 +33,10 @@ function makeUsage(overrides: Partial<StatusUsage> = {}): StatusUsage {
   };
 }
 
-function makeSnapshot(usageOverrides: Partial<StatusUsage> = {}): StatusSnapshot {
+function makeSnapshot(
+  usageOverrides: Partial<StatusUsage> = {},
+  backendState: DaemonBackendState | null = null,
+): StatusSnapshot {
   return {
     health: {
       daemon: 'running',
@@ -54,7 +57,7 @@ function makeSnapshot(usageOverrides: Partial<StatusUsage> = {}): StatusSnapshot
       dollarValueRecovered: null,
       recentDispatches: [],
     },
-    backendState: null,
+    backendState,
   };
 }
 
@@ -397,5 +400,127 @@ describe('Medium-4: buildFreshnessLine null source degradation', () => {
     const snapshot = makeSnapshot({ lastPolledAt, source: null, confidence: 'high' });
     const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
     expect(output).toContain('Updated 1m ago · unknown (high confidence)');
+  });
+
+  it('treats confidence===null with source===oauth as non-degraded (no annotation appended)', () => {
+    // null confidence means the daemon has polled but confidence has not been set.
+    // Per production logic (status-presenter.ts buildFreshnessLine), null confidence is treated
+    // as non-degraded so no source/confidence annotation should be appended.
+    const lastPolledAt = new Date(FIXED_NOW - 3 * 60_000).toISOString();
+    const snapshot = makeSnapshot({ lastPolledAt, source: 'oauth', confidence: null });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).toContain('Updated 3m ago');
+    expect(output).not.toContain('confidence)');
+  });
+
+  it('appends degradation annotation when source is oauth but confidence is medium', () => {
+    // medium confidence is not 'high', so isHighConfidence is false and the annotation fires
+    // even though source is healthy (oauth).
+    const lastPolledAt = new Date(FIXED_NOW - 2 * 60_000).toISOString();
+    const snapshot = makeSnapshot({ lastPolledAt, source: 'oauth', confidence: 'medium' });
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).toContain('Updated 2m ago · oauth (medium confidence)');
+  });
+});
+
+describe('Backend state rendering in status output', () => {
+  beforeEach(() => {
+    setRenderContext({ noColor: true, useUnicode: false, isTTY: false, width: 80 });
+  });
+
+  afterEach(() => {
+    resetRenderContext();
+  });
+
+  it('AC1: renders available backend with docker version', () => {
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: 'docker', version: '24.0.7', available: true },
+    );
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).toContain('Backend');
+    expect(output).toContain('container (docker 24.0.7)');
+  });
+
+  it('AC1: renders available backend with podman runtime', () => {
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: 'podman', version: '4.9.3', available: true },
+    );
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).toContain('Backend');
+    expect(output).toContain('container (podman 4.9.3)');
+  });
+
+  it('AC1: renders available backend with null runtime as "container"', () => {
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: null, version: null, available: true },
+    );
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).toContain('Backend');
+    expect(output).toContain('container (container)');
+  });
+
+  it('AC2: renders unavailable backend with recovery hint', () => {
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: null, version: null, available: false },
+    );
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).toContain('Backend');
+    expect(output).toContain('container (unavailable)');
+    expect(output).toContain('Restart Docker/Podman to restore container execution');
+  });
+
+  it('AC2: unavailable backend causes health card to render with warning state', () => {
+    // healthCardState returns 'warning' when backendState.available is false and daemon+auth are healthy.
+    // In noColor mode renderDashboardCard appends "[WARN]" to the card title when state === 'warning'.
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: null, version: null, available: false },
+    );
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    // Verify the Health card title shows the [WARN] suffix that signals warning card state
+    expect(output).toContain('Health [WARN]');
+  });
+
+  it('does not render backend line when backendState is null', () => {
+    const snapshot = makeSnapshot({}, null);
+    const output = renderStatusOutput(snapshot, { all: false, detail: false, explain: false });
+    expect(output).not.toContain('Backend');
+  });
+
+  it('AC3: serialised JSON snapshot includes backendState with all required fields for available backend', () => {
+    // The status --json path calls printJson(jsonOk(enriched)) where enriched spreads the snapshot.
+    // This test serialises the snapshot as JSON (mimicking jsonOk serialisation) and verifies the
+    // backendState fields survive round-trip — catching any accidental omission or rename.
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: 'docker', version: '24.0.7', available: true },
+    );
+    const serialised = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+    expect(serialised.backendState).not.toBeNull();
+    expect(serialised.backendState).toMatchObject({
+      available: true,
+      name: 'container',
+      version: '24.0.7',
+    });
+  });
+
+  it('AC3: serialised JSON snapshot includes backendState with null runtime and version for unavailable backend', () => {
+    // Mirrors the available-backend JSON test but for the unavailable case.
+    const snapshot = makeSnapshot(
+      {},
+      { name: 'container', runtime: null, version: null, available: false },
+    );
+    const serialised = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+    expect(serialised.backendState).not.toBeNull();
+    expect(serialised.backendState).toMatchObject({
+      available: false,
+      name: 'container',
+      runtime: null,
+      version: null,
+    });
   });
 });

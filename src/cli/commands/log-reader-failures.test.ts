@@ -151,4 +151,22 @@ describe('getRecentTaskFailures', () => {
     const result = await getRecentTaskFailures('/nonexistent/path', ['security-audit']);
     expect(result.size).toBe(0);
   });
+
+  it('applies last-seen error to a name when two tasks share the same name (name-collision behaviour)', async () => {
+    // Two historical tasks can share the same name; getRecentTaskFailures is keyed by name,
+    // so the most-recent (last-scanned-backward = first in file order) failure wins.
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    // Older failure first, then a newer failure for the same name
+    const lines = [
+      auditLine('shared-name', 'task.failed', 'OLDER_ERROR'),
+      auditLine('shared-name', 'task.failed', 'NEWER_ERROR'),
+    ];
+    await writeFile(join(logsDir, `audit-${today}.jsonl`), lines.join('\n') + '\n');
+
+    const result = await getRecentTaskFailures(logsDir, ['shared-name'], now);
+    // Scans backward: NEWER_ERROR is at end of file → found first → wins
+    expect(result.size).toBe(1);
+    expect(result.get('shared-name')).toBe('NEWER_ERROR');
+  });
 });

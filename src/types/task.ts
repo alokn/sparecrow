@@ -19,6 +19,8 @@ export interface TaskDefinition {
   targetPath: string;
   priority: number;
   createdAt: Date;
+  /** Timestamp when the task transitioned to a terminal status (done/failed/skipped). Absent for pending/in-progress tasks. */
+  completedAt?: Date;
   timeoutMs: number; // default 60 * 60 * 1000 (60 min)
   /** Declared action types from the template manifest (for post-execution pipeline). Always present; defaults to []. */
   actions: ReadonlyArray<ActionType>;
