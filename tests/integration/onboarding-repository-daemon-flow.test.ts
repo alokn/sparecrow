@@ -63,8 +63,9 @@ describe('onboarding repo + queue seeding flow — Story 5.3 end-to-end', () => 
     );
     await persistFullConfig(
       {
-        triggerThresholdPercentage: 80,
-        triggerTimeBeforeResetMinutes: 60,
+        triggerMaxWastePercentage: 50,
+        triggerWeeklyReservePercentage: 30,
+        triggerIdleHours: [],
         pollingInterval: 300,
         selectedTemplates: ['improve-code', 'security-audit'],
         allowDangerouslySkipPermissions: false,
@@ -72,7 +73,7 @@ describe('onboarding repo + queue seeding flow — Story 5.3 end-to-end', () => 
       repoResult.absolutePath,
     );
     const configContent = await readFile(configPath, 'utf-8');
-    expect(configContent).toContain('max_waste_percentage: 30');
+    expect(configContent).toContain('max_waste_percentage: 50');
     expect(configContent).toContain('polling_interval: 300');
 
     // Step 3: Seed queue

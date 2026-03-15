@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { mkdir, rm, readFile } from 'node:fs/promises';
+import * as realFsPromises from 'node:fs/promises';
+import * as realUtils from '../../src/utils/index.js';
 
 describe('onboarding auth flow — Story 5.1 end-to-end', () => {
   let tmpDir: string;
@@ -23,50 +25,47 @@ describe('onboarding auth flow — Story 5.1 end-to-end', () => {
     const configPath = join(tmpDir, 'config.yaml');
 
     // Mock all subprocess calls via spawnWithGuardrails using the barrel import
-    vi.doMock('../../src/utils/index.js', async () => {
-      const actual = await vi.importActual<typeof import('../../src/utils/index.js')>(
-        '../../src/utils/index.js',
-      );
-      return {
-        ...actual,
-        spawnWithGuardrails: vi
-          .fn()
-          .mockResolvedValueOnce({
-            // which claude → found
-            stdout: '/usr/local/bin/claude\n',
-            stderr: '',
-            exitCode: 0,
-            timedOut: false,
-            aborted: false,
-            enoent: false,
-          })
-          .mockResolvedValueOnce({
-            // claude auth status --json → authenticated with tier
-            stdout: JSON.stringify({ authenticated: true, account: { plan: 'pro' } }),
-            stderr: '',
-            exitCode: 0,
-            timedOut: false,
-            aborted: false,
-            enoent: false,
-          }),
-      };
-    });
+    vi.doMock('../../src/utils/index.js', () => ({
+      ...realUtils,
+      spawnWithGuardrails: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stdout: '/usr/local/bin/claude\n',
+          stderr: '',
+          exitCode: 0,
+          timedOut: false,
+          aborted: false,
+          enoent: false,
+        })
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify({ loggedIn: true, subscriptionType: 'pro' }),
+          stderr: '',
+          exitCode: 0,
+          timedOut: false,
+          aborted: false,
+          enoent: false,
+        }),
+    }));
 
-    // Mock auth manager to say credentials are valid
-    vi.doMock('../../src/providers/claude-code/auth-manager.js', () => ({
-      ClaudeCodeAuthManager: vi.fn().mockImplementation(() => ({
-        validate: vi.fn().mockResolvedValue(true),
-      })),
+    // Mock auth manager to say credentials are valid (must mock the barrel, not the internal file)
+    vi.doMock('../../src/providers/claude-code/index.js', () => ({
+      ClaudeCodeAuthManager: class { validate = vi.fn().mockResolvedValue(true); },
+      parseAuthStatusOutput: (raw: string) => {
+        try {
+          const obj = JSON.parse(raw) as Record<string, unknown>;
+          return {
+            authenticated: obj['loggedIn'] === true,
+            tier: typeof obj['subscriptionType'] === 'string' ? obj['subscriptionType'] : 'unknown',
+          };
+        } catch { return { authenticated: false, tier: 'unknown' }; }
+      },
     }));
 
     // Mock fs access check for executable
-    vi.doMock('node:fs/promises', async () => {
-      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-      return {
-        ...actual,
-        access: vi.fn().mockResolvedValue(undefined),
-      };
-    });
+    vi.doMock('node:fs/promises', () => ({
+      ...realFsPromises,
+      access: vi.fn().mockResolvedValue(undefined),
+    }));
 
     // Mock platform paths to use tmpDir
     vi.doMock('../../src/platform/index.js', () => ({
@@ -103,22 +102,17 @@ describe('onboarding auth flow — Story 5.1 end-to-end', () => {
   it('does not write config when Claude is not found', async () => {
     const configPath = join(tmpDir, 'config.yaml');
 
-    vi.doMock('../../src/utils/index.js', async () => {
-      const actual = await vi.importActual<typeof import('../../src/utils/index.js')>(
-        '../../src/utils/index.js',
-      );
-      return {
-        ...actual,
-        spawnWithGuardrails: vi.fn().mockResolvedValue({
-          stdout: '',
-          stderr: '',
-          exitCode: null,
-          timedOut: false,
-          aborted: false,
-          enoent: true, // which itself not found
-        }),
-      };
-    });
+    vi.doMock('../../src/utils/index.js', () => ({
+      ...realUtils,
+      spawnWithGuardrails: vi.fn().mockResolvedValue({
+        stdout: '',
+        stderr: '',
+        exitCode: null,
+        timedOut: false,
+        aborted: false,
+        enoent: true, // which itself not found
+      }),
+    }));
 
     vi.doMock('../../src/cli/index.js', () => ({
       isJsonMode: () => false,
@@ -147,46 +141,45 @@ describe('onboarding auth flow — Story 5.1 end-to-end', () => {
   it('does not write config when auth fails', async () => {
     const configPath = join(tmpDir, 'config.yaml');
 
-    vi.doMock('../../src/utils/index.js', async () => {
-      const actual = await vi.importActual<typeof import('../../src/utils/index.js')>(
-        '../../src/utils/index.js',
-      );
-      return {
-        ...actual,
-        spawnWithGuardrails: vi
-          .fn()
-          .mockResolvedValueOnce({
-            stdout: '/usr/local/bin/claude\n',
-            stderr: '',
-            exitCode: 0,
-            timedOut: false,
-            aborted: false,
-            enoent: false,
-          })
-          .mockResolvedValueOnce({
-            stdout: JSON.stringify({ authenticated: false }),
-            stderr: '',
-            exitCode: 0,
-            timedOut: false,
-            aborted: false,
-            enoent: false,
-          }),
-      };
-    });
-
-    vi.doMock('../../src/providers/claude-code/auth-manager.js', () => ({
-      ClaudeCodeAuthManager: vi.fn().mockImplementation(() => ({
-        validate: vi.fn().mockResolvedValue(false),
-      })),
+    vi.doMock('../../src/utils/index.js', () => ({
+      ...realUtils,
+      spawnWithGuardrails: vi
+        .fn()
+        .mockResolvedValueOnce({
+          stdout: '/usr/local/bin/claude\n',
+          stderr: '',
+          exitCode: 0,
+          timedOut: false,
+          aborted: false,
+          enoent: false,
+        })
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify({ loggedIn: false }),
+          stderr: '',
+          exitCode: 0,
+          timedOut: false,
+          aborted: false,
+          enoent: false,
+        }),
     }));
 
-    vi.doMock('node:fs/promises', async () => {
-      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-      return {
-        ...actual,
-        access: vi.fn().mockResolvedValue(undefined),
-      };
-    });
+    vi.doMock('../../src/providers/claude-code/index.js', () => ({
+      ClaudeCodeAuthManager: class { validate = vi.fn().mockResolvedValue(false); },
+      parseAuthStatusOutput: (raw: string) => {
+        try {
+          const obj = JSON.parse(raw) as Record<string, unknown>;
+          return {
+            authenticated: obj['loggedIn'] === true,
+            tier: typeof obj['subscriptionType'] === 'string' ? obj['subscriptionType'] : 'unknown',
+          };
+        } catch { return { authenticated: false, tier: 'unknown' }; }
+      },
+    }));
+
+    vi.doMock('node:fs/promises', () => ({
+      ...realFsPromises,
+      access: vi.fn().mockResolvedValue(undefined),
+    }));
 
     vi.doMock('../../src/cli/index.js', () => ({
       isJsonMode: () => false,
@@ -219,31 +212,22 @@ describe('onboarding auth flow — Story 5.1 end-to-end', () => {
   });
 
   it('output does not contain credential material', async () => {
-    // Verify that output from helpers does not contain token-like fields
-    vi.doMock('../../src/utils/index.js', async () => {
-      const actual = await vi.importActual<typeof import('../../src/utils/index.js')>(
-        '../../src/utils/index.js',
-      );
-      return {
-        ...actual,
-        spawnWithGuardrails: vi.fn().mockResolvedValue({
-          stdout: '/usr/local/bin/claude\n',
-          stderr: '',
-          exitCode: 0,
-          timedOut: false,
-          aborted: false,
-          enoent: false,
-        }),
-      };
-    });
+    vi.doMock('../../src/utils/index.js', () => ({
+      ...realUtils,
+      spawnWithGuardrails: vi.fn().mockResolvedValue({
+        stdout: '/usr/local/bin/claude\n',
+        stderr: '',
+        exitCode: 0,
+        timedOut: false,
+        aborted: false,
+        enoent: false,
+      }),
+    }));
 
-    vi.doMock('node:fs/promises', async () => {
-      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-      return {
-        ...actual,
-        access: vi.fn().mockResolvedValue(undefined),
-      };
-    });
+    vi.doMock('node:fs/promises', () => ({
+      ...realFsPromises,
+      access: vi.fn().mockResolvedValue(undefined),
+    }));
 
     const { renderClaudeNotFoundError, renderAuthSuccess, renderAuthFailedError } = await import(
       '../../src/cli/commands/onboard-auth.js'

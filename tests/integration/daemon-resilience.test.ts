@@ -374,6 +374,11 @@ describe('config reload corruption resilience', () => {
 
 describe('dispatcher task failure isolation', () => {
   it('dispatcher continues processing tasks after one fails', async () => {
+    vi.resetModules();
+    vi.doMock('../../src/daemon/state-writer.js', () => ({
+      writeDispatchStatus: vi.fn().mockResolvedValue(undefined),
+      buildLastErrorDetail: vi.fn((code: string, message: string, cmd: string | null) => ({ code, message, recoveryCommand: cmd })),
+    }));
     const { Dispatcher } = await import('../../src/daemon/dispatcher.js');
     const { EventName } = await import('../../src/types/index.js');
 
@@ -441,15 +446,6 @@ describe('dispatcher task failure isolation', () => {
       }),
     };
 
-    // Mock writeDispatchStatus
-    vi.mock('../../src/daemon/state-writer.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('../../src/daemon/state-writer.js')>();
-      return {
-        ...actual,
-        writeDispatchStatus: vi.fn().mockResolvedValue(undefined),
-      };
-    });
-
     const dispatcher = new Dispatcher({
       queueManager: mockQueueManager as never,
       taskExecutor: mockTaskExecutor as never,
@@ -467,21 +463,27 @@ describe('dispatcher task failure isolation', () => {
     // Queue was not stopped by quota
     expect(result.stoppedByQuota).toBe(false);
 
-    // Both tasks had their status updated
-    const t1Update = updatedStatuses.find((u) => u.id === 't1');
-    const t2Update = updatedStatuses.find((u) => u.id === 't2');
-    expect(t1Update?.status).toBe('failed');
-    expect(t2Update?.status).toBe('done');
+    // Both tasks had their status updated (dispatcher sets in-progress before execute, then final status)
+    const t1Updates = updatedStatuses.filter((u) => u.id === 't1');
+    const t2Updates = updatedStatuses.filter((u) => u.id === 't2');
+    expect(t1Updates.at(-1)?.status).toBe('failed');
+    expect(t2Updates.at(-1)?.status).toBe('done');
 
     // Failure was logged
-    expect(logEvents.some((e) => e === 'task.failed')).toBe(true);
+    expect(logEvents.some((e) => e === EventName.TASK_FAILED)).toBe(true);
     // Success was logged
     expect(logEvents.some((e) => e === EventName.TASK_COMPLETED)).toBe(true);
 
     vi.restoreAllMocks();
+    vi.resetModules();
   });
 
   it('dispatcher stops cycle on quota exhaustion and marks task as failed_quota', async () => {
+    vi.resetModules();
+    vi.doMock('../../src/daemon/state-writer.js', () => ({
+      writeDispatchStatus: vi.fn().mockResolvedValue(undefined),
+      buildLastErrorDetail: vi.fn((code: string, message: string, cmd: string | null) => ({ code, message, recoveryCommand: cmd })),
+    }));
     const { Dispatcher } = await import('../../src/daemon/dispatcher.js');
     const { EventName } = await import('../../src/types/index.js');
 
@@ -519,11 +521,6 @@ describe('dispatcher task failure isolation', () => {
       }),
     };
 
-    vi.mock('../../src/daemon/state-writer.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('../../src/daemon/state-writer.js')>();
-      return { ...actual, writeDispatchStatus: vi.fn().mockResolvedValue(undefined) };
-    });
-
     const dispatcher = new Dispatcher({
       queueManager: mockQueueManager as never,
       taskExecutor: mockTaskExecutor as never,
@@ -538,14 +535,15 @@ describe('dispatcher task failure isolation', () => {
     // task2 was never attempted
     expect(mockTaskExecutor.execute).toHaveBeenCalledTimes(1);
 
-    const t1Update = updatedStatuses.find((u) => u.id === 't1');
-    expect(t1Update?.status).toBe('failed_quota');
+    const t1Updates = updatedStatuses.filter((u) => u.id === 't1');
+    expect(t1Updates.at(-1)?.status).toBe('failed_quota');
 
     // DISPATCH_QUOTA_EXHAUSTED and TASK_REQUEUED events logged
     expect(logEvents.some((e) => e === EventName.DISPATCH_QUOTA_EXHAUSTED)).toBe(true);
     expect(logEvents.some((e) => e === EventName.TASK_REQUEUED)).toBe(true);
 
     vi.restoreAllMocks();
+    vi.resetModules();
   });
 });
 
@@ -554,73 +552,83 @@ describe('dispatcher task failure isolation', () => {
 // ---------------------------------------------------------------------------
 
 describe('polling loop degraded usage state', () => {
-  it('buildUsageState sets degradedReason for jsonl-estimate source', async () => {
+  it('buildUsageState sets degradedReason for stale source', async () => {
     // Test via PollingLoop internal by constructing a snapshot and checking the resulting state
     // We validate the DaemonUsageState shape by running a single cycle
+    // NOTE: jsonl-estimate source was removed in story 15.9; stale is the degraded source now
     vi.resetModules();
-    vi.mock('../../src/daemon/state-writer.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('../../src/daemon/state-writer.js')>();
-      return {
-        ...actual,
-        writeCycleStatus: vi.fn().mockResolvedValue(undefined),
-        writeDispatchStatus: vi.fn().mockResolvedValue(undefined),
-      };
-    });
-    vi.mock('node:timers/promises', () => ({
+    vi.doMock('../../src/daemon/state-writer.js', () => ({
+      writeCycleStatus: vi.fn().mockResolvedValue(undefined),
+      writeDispatchStatus: vi.fn().mockResolvedValue(undefined),
+      buildLastErrorDetail: vi.fn((code: string, message: string, cmd: string | null) => ({ code, message, recoveryCommand: cmd })),
+    }));
+    vi.doMock('node:timers/promises', () => ({
       setTimeout: vi.fn(async () => {
         const err = new Error('abort');
         err.name = 'AbortError';
         throw err;
       }),
     }));
-    vi.mock('../../src/utils/index.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('../../src/utils/index.js')>();
-      return { ...actual, retryWithBackoff: vi.fn((fn: () => Promise<unknown>) => fn()) };
-    });
-
-    const { PollingLoop } = await import('../../src/daemon/polling-loop.js');
-    const stateWriter = await import('../../src/daemon/state-writer.js');
-    const writeCycleStatus = vi.mocked(stateWriter.writeCycleStatus);
-
-    const degradedSnapshot = {
-      windows: [{ name: '5-hour session', utilization: 0.2, resetsAt: new Date(Date.now() + 3600000) }],
-      provider: 'claude-code' as const,
-      fetchedAt: new Date(),
-      source: 'jsonl-estimate' as const,
-      confidence: 'medium' as const,
-    };
-
-    const loop = new PollingLoop({
-      usageMonitor: { poll: vi.fn().mockResolvedValue(degradedSnapshot) },
-      triggerEngine: {
-        evaluate: vi.fn().mockReturnValue({
-          shouldDispatch: false,
-          reason: 'threshold',
-          evaluatedAt: new Date(),
-          snapshotSource: 'jsonl-estimate',
-        }),
-        resetDispatchState: vi.fn(),
+    vi.doMock('../../src/utils/index.js', () => ({
+      logger: {
+        info: vi.fn().mockResolvedValue(undefined),
+        warn: vi.fn().mockResolvedValue(undefined),
+        error: vi.fn().mockResolvedValue(undefined),
+        debug: vi.fn().mockResolvedValue(undefined),
       },
-      dispatchAdapter: { dispatchIfTriggered: vi.fn().mockResolvedValue(null) },
-      getConfig: () => makeConfig(),
-      startedAt: new Date().toISOString(),
-    } as never);
+      retryWithBackoff: vi.fn((fn: () => Promise<unknown>) => fn()),
+    }));
 
-    await loop.start();
+    try {
+      const { PollingLoop } = await import('../../src/daemon/polling-loop.js');
+      const stateWriter = await import('../../src/daemon/state-writer.js');
+      const writeCycleStatus = vi.mocked(stateWriter.writeCycleStatus);
 
-    expect(writeCycleStatus).toHaveBeenCalled();
-    const call = writeCycleStatus.mock.calls[0]?.[0];
-    expect(call).toBeDefined();
-    if (call) {
-      const usage = (call as Record<string, unknown>)['usage'] as Record<string, unknown> | null;
-      expect(usage).not.toBeNull();
-      if (usage) {
-        expect(usage['degradedReason']).toBeTruthy();
-        expect(String(usage['degradedReason'])).toContain('jsonl-estimate');
+      const degradedSnapshot = {
+        rateWindows: [{ name: '5-hour session', utilization: 0.2, resetsAt: new Date(Date.now() + 3600000) }],
+        budgetWindows: [],
+        provider: 'claude-code' as const,
+        fetchedAt: new Date(),
+        source: 'stale' as const,
+        confidence: 'low' as const,
+      };
+
+      const loop = new PollingLoop({
+        usageMonitor: { poll: vi.fn().mockResolvedValue(degradedSnapshot) },
+        triggerEngine: {
+          evaluate: vi.fn().mockReturnValue({
+            shouldDispatch: false,
+            reason: 'threshold',
+            evaluatedAt: new Date(),
+            snapshotSource: 'stale',
+          }),
+          resetDispatchState: vi.fn(),
+        },
+        dispatchAdapter: { dispatchIfTriggered: vi.fn().mockResolvedValue(null) },
+        getConfig: () => makeConfig(),
+        startedAt: new Date().toISOString(),
+      } as never);
+
+      await loop.start();
+
+      expect(writeCycleStatus).toHaveBeenCalled();
+      const call = writeCycleStatus.mock.calls[0]?.[0];
+      expect(call).toBeDefined();
+      if (call) {
+        const usage = (call as Record<string, unknown>)['usage'] as Record<string, unknown> | null;
+        expect(usage).not.toBeNull();
+        if (usage) {
+          expect(usage['degradedReason']).toBeTruthy();
+          expect(String(usage['degradedReason'])).toContain('stale');
+        }
       }
+    } finally {
+      vi.doUnmock('../../src/daemon/state-writer.js');
+      vi.doUnmock('node:timers/promises');
+      vi.doUnmock('../../src/utils/index.js');
+      vi.restoreAllMocks();
+      vi.resetModules();
     }
-
-    vi.restoreAllMocks();
   });
 });
 
@@ -668,6 +676,9 @@ describe('resilience error codes and messages', () => {
 // ---------------------------------------------------------------------------
 
 describe('JSONL audit schema resilience events', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
   it('audit record includes all 8 required fields for resilience events', async () => {
     const { asAuditRecord } = await import('../../src/cli/commands/audit-parsing.js');
 
@@ -719,6 +730,7 @@ describe('state-writer always-present fields', () => {
   let tmpDataDir: string;
 
   beforeEach(async () => {
+    vi.resetModules();
     tmpDataDir = makeTmpDir();
     await mkdir(tmpDataDir, { recursive: true });
   });

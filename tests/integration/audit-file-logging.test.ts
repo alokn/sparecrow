@@ -45,9 +45,10 @@ describe('audit file logging integration (AC6)', () => {
     }));
 
     // Step 3: Import the fresh logger singleton (with _logToFile = false by default).
-    const { logger, enableFileLogging } = await import('../../src/utils/logger.js');
+    const { logger, setLogDir, enableFileLogging } = await import('../../src/utils/logger.js');
 
-    // Step 4: Enable file logging — this is the call runner.ts makes at daemon startup.
+    // Step 4: Set log directory and enable file logging — mirrors what runner.ts does at daemon startup.
+    setLogDir(logsDir);
     enableFileLogging();
 
     // Step 5: Write a log record at each level to exercise the file output path.

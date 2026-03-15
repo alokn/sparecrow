@@ -61,8 +61,8 @@ describe('doctor command — integration', () => {
     const { runDiagnostics } = await import('../../src/cli/commands/doctor-runner.js');
     const result = await runDiagnostics(false);
 
-    expect(result.summary.totalChecks).toBe(8);
-    expect(result.findings).toHaveLength(8);
+    expect(result.summary.totalChecks).toBe(13);
+    expect(result.findings).toHaveLength(13);
 
     // Queue file integrity should be ok with valid empty queue
     const queueFinding = result.findings.find((f) => f.checkKey === 'queue-file-integrity')!;
@@ -218,11 +218,11 @@ describe('doctor command — subprocess pipeline', () => {
     expect(parsed).toHaveProperty('data');
     expect(parsed).toHaveProperty('error');
     expect(Array.isArray(parsed.data?.findings)).toBe(true);
-    expect(parsed.data?.findings).toHaveLength(8);
+    expect(parsed.data?.findings).toHaveLength(13);
     expect(parsed.data?.summary).toHaveProperty('criticalCount');
     expect(parsed.data?.summary).toHaveProperty('warningCount');
     expect(parsed.data?.summary).toHaveProperty('okCount');
     expect(parsed.data?.summary).toHaveProperty('totalChecks');
-    expect(parsed.data?.summary.totalChecks).toBe(8);
+    expect(parsed.data?.summary.totalChecks).toBe(13);
   });
 });

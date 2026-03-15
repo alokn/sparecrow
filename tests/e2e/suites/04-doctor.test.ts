@@ -300,7 +300,9 @@ describe('runDiagnostics', () => {
     );
     expect(authFinding.severity).toBe('critical');
     expect(authFinding.status).toBe('fail');
-    expect(authFinding.message).toBe('No Claude Code credentials found.');
+    expect(authFinding.message).toBe(
+      'No Claude Code credentials found. Run: claude auth login, then sparecrow config --reconnect',
+    );
     expect(authFinding.fixCommand).toBe('claude auth login');
 
     // Do NOT assert parsed.ok === false — jsonOk always sets ok: true (see story notes)
