@@ -4,27 +4,15 @@ import { ErrorCode } from '../errors/index.js';
 
 /** Mock the container backend to always be available (no Docker/Podman required for unit tests). */
 function mockContainerBackendAvailable() {
-  vi.doMock('./backends/container/index.js', () => ({
-    ContainerExecutionBackend: class {
-      readonly name = 'container';
-      async available() {
-        return true;
-      }
-      resetAvailabilityCache() {}
-      async getRuntimeInfo() {
-        return null;
-      }
-      async execute() {
-        return {
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-          timedOut: false,
-          aborted: false,
-          oomKilled: false,
-        };
-      }
-    },
+  vi.doMock('./backends/container/detect-runtime.js', () => ({
+    detectContainerRuntime: vi.fn().mockResolvedValue({ name: 'docker', available: vi.fn() }),
+  }));
+}
+
+/** Mock the container backend to be unavailable (no runtime found). */
+function mockContainerBackendUnavailable() {
+  vi.doMock('./backends/container/detect-runtime.js', () => ({
+    detectContainerRuntime: vi.fn().mockResolvedValue(null),
   }));
 }
 
@@ -62,18 +50,7 @@ describe('createProvider', () => {
 
   it('throws CONTAINER_RUNTIME_NOT_FOUND when container runtime is unavailable', async () => {
     vi.resetModules();
-    vi.doMock('./backends/container/index.js', () => ({
-      ContainerExecutionBackend: class {
-        readonly name = 'container';
-        async available() {
-          return false;
-        }
-        resetAvailabilityCache() {}
-        async getRuntimeInfo() {
-          return null;
-        }
-      },
-    }));
+    mockContainerBackendUnavailable();
     const { createProvider } = await import('./index.js');
     await expect(
       createProvider('claude-code', {
@@ -129,18 +106,7 @@ describe('validateProviderBackend', () => {
 
   it('throws CONTAINER_RUNTIME_NOT_FOUND when container backend is unavailable', async () => {
     vi.resetModules();
-    vi.doMock('./backends/container/index.js', () => ({
-      ContainerExecutionBackend: class {
-        readonly name = 'container';
-        async available() {
-          return false;
-        }
-        resetAvailabilityCache() {}
-        async getRuntimeInfo() {
-          return null;
-        }
-      },
-    }));
+    mockContainerBackendUnavailable();
     const { validateProviderBackend } = await import('./index.js');
     await expect(validateProviderBackend('claude-code')).rejects.toMatchObject({
       code: ErrorCode.CONTAINER_RUNTIME_NOT_FOUND,

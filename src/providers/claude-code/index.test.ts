@@ -95,29 +95,17 @@ function createTaskDefinition(): TaskDefinition {
   };
 }
 
-/** Mock the container backend to always be available (no Docker/Podman required for unit tests). */
+/** Mock container runtime detection to always find a runtime (no Docker/Podman required for unit tests). */
 function mockContainerBackendAvailable() {
-  vi.doMock('../backends/container/index.js', () => ({
-    ContainerExecutionBackend: class {
-      readonly name = 'container';
-      async available() {
-        return true;
-      }
-      resetAvailabilityCache() {}
-      async getRuntimeInfo() {
-        return null;
-      }
-      async execute() {
-        return {
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-          timedOut: false,
-          aborted: false,
-          oomKilled: false,
-        };
-      }
-    },
+  vi.doMock('../backends/container/detect-runtime.js', () => ({
+    detectContainerRuntime: vi.fn().mockResolvedValue({ name: 'docker', available: vi.fn() }),
+  }));
+}
+
+/** Mock container runtime detection to find no runtime. */
+function mockContainerBackendUnavailable() {
+  vi.doMock('../backends/container/detect-runtime.js', () => ({
+    detectContainerRuntime: vi.fn().mockResolvedValue(null),
   }));
 }
 
@@ -229,18 +217,7 @@ describe('createClaudeCodeProvider', () => {
 
   it('throws CONTAINER_RUNTIME_NOT_FOUND when runtime is unavailable', async () => {
     vi.resetModules();
-    vi.doMock('../backends/container/index.js', () => ({
-      ContainerExecutionBackend: class {
-        readonly name = 'container';
-        async available() {
-          return false;
-        }
-        resetAvailabilityCache() {}
-        async getRuntimeInfo() {
-          return null;
-        }
-      },
-    }));
+    mockContainerBackendUnavailable();
     const { createClaudeCodeProvider } = await import('./index.js');
     await expect(
       createClaudeCodeProvider(makeConfig({ executionBackend: 'container' })),
