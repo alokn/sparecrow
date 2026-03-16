@@ -1,6 +1,6 @@
 /** Zod schema for config.yaml — maps snake_case YAML keys to camelCase TypeScript. */
 import { z } from 'zod';
-import type { ScrowConfig, ContainerConfig } from '../types/index.js';
+import type { ScrowConfig, ContainerConfig, TelemetryConfig } from '../types/index.js';
 
 export const ContainerConfigSchema: z.ZodType<ContainerConfig> = z
   .object({
@@ -102,6 +102,13 @@ const CustomTaskSchema = z.object({
   target_path: z.string().min(1),
 });
 
+const TelemetryConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    endpoint: z.string().url().default('https://telemetry.sparecrow.dev/v1/events'),
+  })
+  .default({ enabled: false, endpoint: 'https://telemetry.sparecrow.dev/v1/events' });
+
 export const ScrowConfigSchema = z
   .object({
     polling_interval: z.number().int().min(60).max(3600).default(300),
@@ -120,6 +127,7 @@ export const ScrowConfigSchema = z
       idle_hours: [],
     }),
     tasks: z.array(CustomTaskSchema).default([]),
+    telemetry: TelemetryConfigSchema,
     wsl_mount_prefix: z
       .string()
       .trim()
@@ -161,6 +169,10 @@ export const ScrowConfigSchema = z
         targetPath: t.target_path,
       })),
       wslMountPrefix: v.wsl_mount_prefix,
+      telemetry: {
+        enabled: v.telemetry.enabled,
+        endpoint: v.telemetry.endpoint,
+      } satisfies TelemetryConfig,
     }),
   );
 

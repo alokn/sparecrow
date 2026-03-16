@@ -27,3 +27,6 @@ export type { RepoValidationResult } from './repo-validation.js';
 export { sanitizeArgs, formatArgsForError } from './exec.js';
 
 export { levenshteinDistance, findClosestMatch } from './fuzzy-match.js';
+
+export { writeCrashReport } from './crash-reporter.js';
+export type { CrashReport, SanitisedAuditEntry, ConfigSummary } from './crash-reporter.js';

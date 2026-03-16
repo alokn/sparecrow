@@ -21,6 +21,10 @@ export const CONFIG_DEFAULTS: Partial<ScrowConfig> = {
   },
   tasks: [],
   wslMountPrefix: '/mnt/',
+  telemetry: {
+    enabled: false,
+    endpoint: 'https://telemetry.sparecrow.dev/v1/events',
+  },
 };
 
 /**
@@ -46,4 +50,8 @@ export const CONFIG_FALLBACK: ScrowConfig = {
   },
   tasks: [],
   wslMountPrefix: '/mnt/',
+  telemetry: {
+    enabled: false,
+    endpoint: 'https://telemetry.sparecrow.dev/v1/events',
+  },
 };

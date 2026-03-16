@@ -282,6 +282,7 @@ describe('config command error paths', () => {
         provider: { name: 'claude-code', claudePath: null },
         trigger: { maxWastePercentage: 50, weeklyReservePercentage: 30, idleHours: [] },
         tasks: [],
+        telemetry: { enabled: false, endpoint: 'https://telemetry.sparecrow.dev/v1/events' },
       }),
       resolveConfigFilePath: (configDir: string, override?: string | null) =>
         override ?? join(configDir, 'config.yaml'),
@@ -313,6 +314,7 @@ describe('config command error paths', () => {
         provider: { name: 'claude-code', claudePath: null },
         trigger: { maxWastePercentage: 50, weeklyReservePercentage: 30, idleHours: [] },
         tasks: [],
+        telemetry: { enabled: false, endpoint: 'https://telemetry.sparecrow.dev/v1/events' },
       }),
       resolveConfigFilePath: (configDir: string, override?: string | null) =>
         override ?? join(configDir, 'config.yaml'),

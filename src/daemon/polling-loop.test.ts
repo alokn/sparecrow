@@ -123,6 +123,7 @@ const makeConfig = (overrides: Partial<ScrowConfig> = {}): ScrowConfig => ({
   tasks: [],
   lastSummaryEnabled: false,
   wslMountPrefix: '/mnt/',
+  telemetry: { enabled: false, endpoint: 'https://telemetry.sparecrow.dev/v1/events' },
   ...overrides,
 });
 
@@ -2842,6 +2843,7 @@ describe('PollingLoop — buildTriggerState new fields (Story 15.6)', () => {
         tasks: [],
         lastSummaryEnabled: false,
         wslMountPrefix: '/mnt/',
+        telemetry: { enabled: false, endpoint: 'https://telemetry.sparecrow.dev/v1/events' },
       }),
       startedAt: new Date().toISOString(),
     });

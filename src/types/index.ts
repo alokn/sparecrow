@@ -13,6 +13,7 @@ export type {
   ContainerConfig,
   IdleHoursEntry,
   DayOfWeek,
+  TelemetryConfig,
 } from './config.js';
 
 export type { CapacitySnapshot, CapacityWindow, UsageSource, ConfidenceLevel } from './usage.js';

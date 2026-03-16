@@ -229,6 +229,7 @@ export async function seedQueue(
 export async function persistFullConfig(
   state: OnboardingState,
   _targetPath: string,
+  opts?: { telemetryEnabled?: boolean },
 ): Promise<void> {
   const configPath = getConfigPath() ?? join(getPaths().config, 'config.yaml');
 
@@ -280,6 +281,12 @@ export async function persistFullConfig(
   };
 
   raw['polling_interval'] = state.pollingInterval;
+
+  const existingTelemetry = (raw['telemetry'] as Record<string, unknown> | undefined) ?? {};
+  raw['telemetry'] = {
+    ...existingTelemetry,
+    enabled: opts?.telemetryEnabled ?? false,
+  };
 
   const validation = ScrowConfigSchema.safeParse(raw);
   if (!validation.success) {

@@ -1039,6 +1039,7 @@ describe('registerOnboard() — Story 5.2+5.3: full flow success', () => {
     expect(repoDaemonMock.persistFullConfig).toHaveBeenCalledWith(
       expect.objectContaining({ allowDangerouslySkipPermissions: true }),
       '/tmp/test-repo',
+      expect.objectContaining({ telemetryEnabled: expect.any(Boolean) }),
     );
     expect(process.exit).toHaveBeenCalledWith(0);
   });
@@ -1344,6 +1345,7 @@ describe('registerOnboard() — Story 10-13: backend edit stage removed', () => 
     expect(repoDaemonMock.persistFullConfig).toHaveBeenCalledWith(
       expect.objectContaining({ containerRuntime: 'docker' }),
       expect.any(String),
+      expect.objectContaining({ telemetryEnabled: expect.any(Boolean) }),
     );
   });
 });
@@ -1564,6 +1566,7 @@ describe('registerOnboard() — Story 5.3: edit loop template/repo/permissions/d
     expect(repoDaemonMock.persistFullConfig).toHaveBeenCalledWith(
       expect.objectContaining({ selectedTemplates: newTemplates }),
       expect.any(String),
+      expect.objectContaining({ telemetryEnabled: expect.any(Boolean) }),
     );
   });
 
@@ -1598,6 +1601,7 @@ describe('registerOnboard() — Story 5.3: edit loop template/repo/permissions/d
     expect(repoDaemonMock.persistFullConfig).toHaveBeenCalledWith(
       expect.any(Object),
       '/tmp/new-repo',
+      expect.objectContaining({ telemetryEnabled: expect.any(Boolean) }),
     );
   });
 
@@ -1636,6 +1640,7 @@ describe('registerOnboard() — Story 5.3: edit loop template/repo/permissions/d
     expect(repoDaemonMock.persistFullConfig).toHaveBeenCalledWith(
       expect.objectContaining({ allowDangerouslySkipPermissions: true }),
       expect.any(String),
+      expect.objectContaining({ telemetryEnabled: expect.any(Boolean) }),
     );
   });
 

@@ -286,6 +286,19 @@ async function runOnboardingWizard(installDaemonFlag: boolean, program: Command)
     }
   }
 
+  // ── Telemetry opt-in (Story 24.1 AC1) ─────────────────────────────
+  const telemetryChoice = await confirm({
+    message:
+      'Help improve sparecrow by sharing anonymous usage data? (no personal data is ever sent)',
+    initialValue: false,
+  });
+  if (isCancel(telemetryChoice)) {
+    outro('Setup cancelled.');
+    process.exit(1);
+    return;
+  }
+  const telemetryEnabled = telemetryChoice === true;
+
   // ── Apply phase (Story 5.3 AC4, AC5, AC6, AC7, AC9) ──────────────
   const snapshots = await captureSnapshots();
 
@@ -293,7 +306,7 @@ async function runOnboardingWizard(installDaemonFlag: boolean, program: Command)
     // Step 1: Persist configuration
     const configSpinner = spinner();
     configSpinner.start('Saving configuration...');
-    await persistFullConfig(onboardState, targetPath);
+    await persistFullConfig(onboardState, targetPath, { telemetryEnabled });
     configSpinner.stop('Configuration saved');
 
     // Step 2: Seed queue

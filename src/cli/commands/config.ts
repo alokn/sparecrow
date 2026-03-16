@@ -28,6 +28,8 @@ const SETTABLE_CONFIG_KEYS = new Set([
   'provider.container.memory_limit_mb',
   'trigger.max_waste_percentage',
   'trigger.weekly_reserve_percentage',
+  'telemetry.enabled',
+  'telemetry.endpoint',
 ]);
 
 export function registerConfig(program: Command): void {
@@ -135,6 +137,10 @@ function redact(cfg: ScrowConfig): Record<string, unknown> {
       prompt: task.prompt,
       target_path: task.targetPath,
     })),
+    telemetry: {
+      enabled: cfg.telemetry.enabled,
+      endpoint: cfg.telemetry.endpoint,
+    },
   };
 }
 
@@ -148,6 +154,45 @@ async function cmdConfigGet(key: string): Promise<void> {
   const paths = getPaths();
   const configPath = resolveConfigFilePath(paths.config, getConfigPath());
   const cfg = await loadConfig(configPath);
+
+  // AC5: `sparecrow config get telemetry` shows full transparency view
+  if (key === 'telemetry') {
+    const { TelemetryCollector } = await import('../../telemetry/index.js');
+    const collector = new TelemetryCollector({
+      version: '0.0.0', // version not needed for display
+      stateDir: paths.data,
+    });
+    const installationId = await collector.getInstallationId();
+    await collector.loadRecentEvents();
+    const recentEvents = collector.getRecentEvents();
+
+    if (isJsonMode()) {
+      printJson(
+        jsonOk({
+          enabled: cfg.telemetry.enabled,
+          installationId,
+          endpoint: cfg.telemetry.endpoint,
+          recentEvents,
+        }),
+      );
+      return;
+    }
+
+    process.stdout.write(`Telemetry enabled:  ${cfg.telemetry.enabled}\n`);
+    process.stdout.write(`Installation ID:    ${installationId}\n`);
+    process.stdout.write(`Endpoint:           ${cfg.telemetry.endpoint}\n`);
+    process.stdout.write(`Recent events (last ${recentEvents.length}):\n`);
+    if (recentEvents.length === 0) {
+      process.stdout.write('  (none)\n');
+    } else {
+      for (const event of recentEvents) {
+        process.stdout.write(
+          `  ${event.timestamp} ${event.eventType}${event.commandName ? ` (${event.commandName})` : ''}${event.errorCode ? ` [${event.errorCode}]` : ''}\n`,
+        );
+      }
+    }
+    return;
+  }
 
   // Support both snake_case and camelCase key lookup
   const keyMap: Record<string, unknown> = {
@@ -168,6 +213,8 @@ async function cmdConfigGet(key: string): Promise<void> {
     'trigger.maxWastePercentage': cfg.trigger.maxWastePercentage,
     'trigger.weekly_reserve_percentage': cfg.trigger.weeklyReservePercentage,
     'trigger.weeklyReservePercentage': cfg.trigger.weeklyReservePercentage,
+    'telemetry.enabled': cfg.telemetry.enabled,
+    'telemetry.endpoint': cfg.telemetry.endpoint,
   };
 
   if (!(key in keyMap)) {

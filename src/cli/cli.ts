@@ -133,6 +133,30 @@ export async function run(): Promise<void> {
     }
   });
 
+  // Record command_run telemetry after each command completes (fire-and-forget).
+  // Errors are silently swallowed — telemetry must never affect CLI behaviour.
+  program.hook('postAction', (thisCommand) => {
+    void (async () => {
+      try {
+        const { loadConfig, resolveConfigFilePath } = await import('../config/index.js');
+        const { getPaths } = await import('../platform/index.js');
+        const { recordTelemetryEvent } = await import('../telemetry/index.js');
+        const paths = getPaths();
+        const configPath = resolveConfigFilePath(paths.config, _configPath);
+        const cfg = await loadConfig(configPath);
+        if (cfg.telemetry.enabled) {
+          await recordTelemetryEvent(
+            { version: pkg.version, config: cfg, stateDir: paths.data },
+            'command_run',
+            thisCommand.name(),
+          );
+        }
+      } catch {
+        // Telemetry errors must never surface to the user
+      }
+    })();
+  });
+
   // Register all command modules
   const { registerStatus } = await import('./commands/status.js');
   const { registerQueue } = await import('./commands/queue.js');
@@ -151,6 +175,8 @@ export async function run(): Promise<void> {
   const { registerRefresh } = await import('./commands/refresh.js');
   const { registerQuickstart } = await import('./commands/quickstart.js');
   const { registerExamples } = await import('./commands/examples.js');
+  const { registerStats } = await import('./commands/stats.js');
+  const { registerReportCrash } = await import('./commands/report-crash.js');
 
   registerStatus(program);
   registerQueue(program);
@@ -169,6 +195,8 @@ export async function run(): Promise<void> {
   registerRefresh(program);
   registerQuickstart(program);
   registerExamples(program);
+  registerStats(program);
+  registerReportCrash(program);
 
   // Unknown command handler with fuzzy matching
   program.on('command:*', (operands: string[]) => {

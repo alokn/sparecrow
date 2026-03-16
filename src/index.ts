@@ -10,16 +10,34 @@ if ((major ?? 0) < MIN_NODE_MAJOR) {
   process.exit(1);
 }
 
+/** Write a crash report and display guidance to the user. */
+async function handleCrash(err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`Unexpected error: ${message}\n`);
+  if (err instanceof Error && err.stack && process.env['DEBUG']) {
+    process.stderr.write(err.stack + '\n');
+  }
+  try {
+    const { writeCrashReport } = await import('./utils/crash-reporter.js');
+    const { getPaths } = await import('./platform/index.js');
+    const paths = getPaths();
+    const reportPath = await writeCrashReport(err, paths.data, paths.logs, paths.config);
+    if (reportPath) {
+      process.stderr.write(
+        `Crash report saved: ${reportPath}\nTo report: sparecrow report-crash ${reportPath}\n`,
+      );
+    }
+  } catch {
+    // Crash reporting itself must never prevent exit
+  }
+}
+
 process.on('uncaughtException', (err) => {
-  process.stderr.write(`Uncaught exception: ${err.message}\n`);
-  if (err.stack && process.env['DEBUG']) process.stderr.write(err.stack + '\n');
-  process.exit(1);
+  void handleCrash(err).finally(() => process.exit(1));
 });
 
 process.on('unhandledRejection', (reason) => {
-  const message = reason instanceof Error ? reason.message : String(reason);
-  process.stderr.write(`Unhandled rejection: ${message}\n`);
-  process.exit(1);
+  void handleCrash(reason).finally(() => process.exit(1));
 });
 
 // Dynamic import so Node version check runs first (before any ESM parsing)

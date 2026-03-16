@@ -57,6 +57,12 @@ export interface ProviderConfig {
   envStripPatterns?: string[]; // additional env variable name patterns to strip from child process env (Story 12.6)
 }
 
+/** Telemetry configuration — opt-in anonymous usage data collection. */
+export interface TelemetryConfig {
+  enabled: boolean; // default false (opt-in)
+  endpoint: string; // HTTPS endpoint for telemetry events
+}
+
 export interface ScrowConfig {
   pollingInterval: number; // seconds; 60-3600; default 300
   logRetentionDays: number; // default 30
@@ -66,4 +72,5 @@ export interface ScrowConfig {
   tasks: CustomTaskConfig[]; // custom prompts (Story 3.4)
   lastSummaryEnabled: boolean; // write last-summary.txt after dispatch (last-summary.json unchanged); default false
   wslMountPrefix: string; // WSL Windows-hosted mount prefix for permission-check bypass; default '/mnt/'
+  telemetry: TelemetryConfig; // opt-in anonymous telemetry (Story 24.1)
 }

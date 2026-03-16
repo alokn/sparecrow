@@ -49,6 +49,7 @@ const makeConfig = (): ScrowConfig => ({
   tasks: [],
   lastSummaryEnabled: false,
   wslMountPrefix: '/mnt/',
+  telemetry: { enabled: false, endpoint: 'https://telemetry.sparecrow.dev/v1/events' },
 });
 
 describe('writeCycleStatus ENOSPC handling (AC2)', () => {

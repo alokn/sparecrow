@@ -1,5 +1,8 @@
 /** Daemon runtime bootstrap — internal entry path for the background daemon child process. */
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import { getPaths, ensureDirectories } from '../platform/index.js';
 import { logger, enableFileLogging, setLogDir, retryWithBackoff } from '../utils/index.js';
 import { loadConfig, CONFIG_FALLBACK } from '../config/index.js';
@@ -35,6 +38,7 @@ import type {
 import { EventName } from '../types/index.js';
 import type { TriggerResult } from '../types/index.js';
 import { ContainerBackendWrapper } from '../providers/backends/index.js';
+import { recordTelemetryEvent } from '../telemetry/index.js';
 
 /**
  * Transient filesystem error codes that warrant retrying config load.
@@ -102,6 +106,21 @@ export async function runDaemon(): Promise<void> {
     return;
   }
   _bootstrapped = true;
+
+  // Resolve package version for telemetry events — mirrors cli.ts version resolution strategy.
+  const __dirname_runner = dirname(fileURLToPath(import.meta.url));
+  let _daemonVersion = '0.0.0';
+  for (const rel of ['../package.json', '../../package.json']) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(__dirname_runner, rel), 'utf-8')) as {
+        version: string;
+      };
+      _daemonVersion = parsed.version;
+      break;
+    } catch {
+      /* try next candidate */
+    }
+  }
 
   // Resolve platform paths first — needed to inject the log directory into the logger.
   const paths = getPaths();
@@ -201,6 +220,12 @@ export async function runDaemon(): Promise<void> {
     // CONFIG_FALLBACK is a properly typed ScrowConfig constant — no assertion needed.
     config = CONFIG_FALLBACK;
   }
+
+  // Emit daemon_start telemetry event (fire-and-forget).
+  void recordTelemetryEvent(
+    { version: _daemonVersion, config, stateDir: paths.data },
+    'daemon_start',
+  );
 
   // Run retention cleanup using configured logRetentionDays (AC6 — non-fatal).
   try {
@@ -592,6 +617,11 @@ export async function runDaemon(): Promise<void> {
     onReload: reloadConfig,
     onShutdownComplete: () => {
       cleanShutdownController.abort();
+      // Emit daemon_stop telemetry event (fire-and-forget — best effort before exit).
+      void recordTelemetryEvent(
+        { version: _daemonVersion, config: currentConfig, stateDir: paths.data },
+        'daemon_stop',
+      );
       // Release PID advisory lock on clean shutdown — fire-and-forget since we're exiting.
       void pidLock.release();
       process.removeListener('uncaughtException', uncaughtHandler);

@@ -93,7 +93,7 @@ describe('CLI Framework', () => {
     });
 
     it('suggests the closest command for a typo', async () => {
-      process.argv = ['node', 'sparecrow', 'stauts'];
+      process.argv = ['node', 'sparecrow', 'stautus'];
       const { run } = await import('./cli.js');
       await run();
       const errOutput = vi.mocked(process.stderr.write).mock.calls.flat().join('');
