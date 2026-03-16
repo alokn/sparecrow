@@ -186,6 +186,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
       timeoutMs: 25000,
@@ -235,6 +236,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
       timeoutMs: 25000,
@@ -295,6 +297,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
       timeoutMs: 38000,
@@ -347,6 +350,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
       timeoutMs: 25000,
