@@ -1,0 +1,53 @@
+# Dependabot v2 configuration for sparecrow
+# Monitors npm dependencies and GitHub Actions for version updates and security vulnerabilities.
+# - Minor/patch updates are grouped by dependency type to reduce PR noise
+# - Major version updates are opened as individual PRs (may contain breaking changes)
+# - Security updates are always opened immediately (Dependabot default behaviour)
+# - Assignees/reviewers intentionally omitted; can be added when a dedicated maintainer is assigned
+# - target-branch: "main" set explicitly so Dependabot PRs always trigger ci.yml (branches: [main])
+# - mirror-public.yml is covered by github-actions entry but is stripped from the public mirror;
+#   Dependabot PRs for mirror-public.yml action bumps are private-repo-only changes (expected)
+
+version: 2
+
+updates:
+  # npm dependencies (package-lock.json)
+  # open-pull-requests-limit: 5 is per-ecosystem; max 10 concurrent Dependabot PRs across both ecosystems
+  - package-ecosystem: "npm"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    groups:
+      production-dependencies:
+        applies-to: version-updates
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      dev-dependencies:
+        applies-to: version-updates
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions workflow dependencies (ci.yml, publish.yml, mirror-public.yml)
+  # open-pull-requests-limit: 5 is per-ecosystem (independent from the npm limit above)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-updates:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"

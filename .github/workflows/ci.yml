@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Audit production dependencies early in setup to gate all downstream jobs;
+      # fail on high/critical severity so unit-tests, e2e-tests, and macos-tests
+      # cannot run against unaudited packages even under cancel-in-progress concurrency.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
   lint-check:
     name: Lint & Type Check
     needs: setup
@@ -42,6 +48,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Audit production dependencies only; fail on high/critical severity
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Type check
         run: npm run typecheck
@@ -111,6 +121,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Audit production dependencies on macOS — optional native deps can resolve
+      # differently from Linux, creating a platform-specific supply-chain blind spot.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Type check
         run: npm run typecheck
