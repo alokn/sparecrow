@@ -6,11 +6,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     exclude: ['tests/integration/**'],
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        maxForks: Math.max(Math.floor(cpus().length * 0.75), 2),
-      },
-    },
+    maxForks: Math.max(Math.floor(cpus().length * 0.75), 2),
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

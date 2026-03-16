@@ -7,7 +7,7 @@ import { jsonOk, jsonError } from '../../types/index.js';
 import { ScrowError, ErrorCode } from '../../errors/index.js';
 import { getPaths } from '../../platform/index.js';
 import { QueueStore, QueueManager } from '../../queue/index.js';
-import { partialOutputPath, finalOutputPath } from '../../daemon/partial-output-writer.js';
+import { partialOutputPath, finalOutputPath } from '../../daemon/index.js';
 
 /** UUID regex for validating task IDs (path traversal prevention). */
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

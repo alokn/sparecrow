@@ -115,6 +115,11 @@ describe('runDiagnostics', () => {
       getConfigPath: () => join(testDir, 'config.yaml'),
     }));
 
+    // Mock container runtime detection so tests don't invoke real Docker/Podman
+    vi.doMock('../../providers/backends/container/index.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(null),
+    }));
+
     // Suppress stderr output from logger
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   });

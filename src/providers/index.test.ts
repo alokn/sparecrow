@@ -4,14 +4,34 @@ import { ErrorCode } from '../errors/index.js';
 
 /** Mock the container backend to always be available (no Docker/Podman required for unit tests). */
 function mockContainerBackendAvailable() {
-  vi.doMock('./backends/container/detect-runtime.js', () => ({
-    detectContainerRuntime: vi.fn().mockResolvedValue({ name: 'docker', available: vi.fn() }),
+  vi.doMock('./backends/container/index.js', () => ({
+    ContainerExecutionBackend: class {
+      readonly name = 'container';
+      async available() {
+        return true;
+      }
+      resetAvailabilityCache() {}
+      async getRuntimeInfo() {
+        return { name: 'docker', version: '24.0.0' };
+      }
+    },
+    detectContainerRuntime: vi.fn().mockResolvedValue({ name: 'docker' }),
   }));
 }
 
 /** Mock the container backend to be unavailable (no runtime found). */
 function mockContainerBackendUnavailable() {
-  vi.doMock('./backends/container/detect-runtime.js', () => ({
+  vi.doMock('./backends/container/index.js', () => ({
+    ContainerExecutionBackend: class {
+      readonly name = 'container';
+      async available() {
+        return false;
+      }
+      resetAvailabilityCache() {}
+      async getRuntimeInfo() {
+        return null;
+      }
+    },
     detectContainerRuntime: vi.fn().mockResolvedValue(null),
   }));
 }

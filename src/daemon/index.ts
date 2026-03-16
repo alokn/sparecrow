@@ -55,3 +55,4 @@ export { executeActions, checkGhAvailable } from './action-executor.js';
 export type { ActionExecutionResult, ActionExecutorContext } from '../types/index.js';
 export { runActionPipeline } from './action-pipeline.js';
 export type { ActionPipelineParams } from './action-pipeline.js';
+export { partialOutputPath, finalOutputPath } from './partial-output-writer.js';
