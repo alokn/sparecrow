@@ -55,13 +55,13 @@ describe('resolveContainerCredentials', () => {
     expect(result.mounts[0]!.source).toBe('/home/testuser/.claude');
   });
 
-  // 5.3: directory mount is read-write (so Claude can create plugins/, etc.)
-  it('returns credentials mount as read-write (readonly: false)', async () => {
+  // 22.1 AC1: directory mount is read-only by default (security hardening)
+  it('returns credentials mount as read-only by default (readonly: true)', async () => {
     const result = await resolveContainerCredentials({
       hostHomedir: '/home/testuser',
     });
 
-    expect(result.mounts[0]!.readonly).toBe(false);
+    expect(result.mounts[0]!.readonly).toBe(true);
   });
 
   // 5.4: directory mount target is $containerHome/.claude (not a file path)
@@ -244,7 +244,7 @@ describe('resolveContainerCredentials', () => {
     // Both .claude/ dir and .claude.json file mounts (neither is settings.json)
     expect(result.mounts).toHaveLength(2);
     expect(result.mounts[0]!.source).toBe('/home/testuser/.claude');
-    expect(result.mounts[0]!.readonly).toBe(false);
+    expect(result.mounts[0]!.readonly).toBe(true);
   });
 
   // 5.19: when .credentials.json missing but .claude.json exists, only .claude.json mount is returned
@@ -410,6 +410,130 @@ describe('resolveContainerCredentials', () => {
     expect(result.mounts).toHaveLength(2);
     expect(result.mounts[0]!.source).toBe('/home/testuser/.claude');
     expect(result.mounts[1]!.source).toBe('/home/testuser/.claude.json');
+  });
+
+  // ─── Story 22.1: Read-only credential mount tests ──────────────────────────
+
+  // 22.1 AC1: .claude/ mount is read-only by default (mount string contains :ro)
+  it('mounts ~/.claude/ directory as read-only by default (readonly: true)', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+    });
+
+    const claudeDirMount = result.mounts.find((m) => m.target.endsWith('/.claude'));
+    expect(claudeDirMount).toBeDefined();
+    expect(claudeDirMount!.readonly).toBe(true);
+  });
+
+  // 22.1 AC4: mountClaudeConfigReadonly: false reverts to read-write
+  it('mounts ~/.claude/ directory as read-write when mountClaudeConfigReadonly is false', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfigReadonly: false,
+    });
+
+    const claudeDirMount = result.mounts.find((m) => m.target.endsWith('/.claude'));
+    expect(claudeDirMount).toBeDefined();
+    expect(claudeDirMount!.readonly).toBe(false);
+  });
+
+  // 22.1 AC4: warn log emitted when readonly override is disabled
+  it('logs CONTAINER_CREDENTIALS_RW_OVERRIDE warning when mountClaudeConfigReadonly is false', async () => {
+    await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfigReadonly: false,
+    });
+
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
+      EventName.CONTAINER_CREDENTIALS_RW_OVERRIDE,
+      expect.objectContaining({
+        message: expect.stringContaining('read-write'),
+      }),
+    );
+  });
+
+  // 22.1: no warning when mountClaudeConfigReadonly is true (default)
+  it('does not log CONTAINER_CREDENTIALS_RW_OVERRIDE when mountClaudeConfigReadonly is true (default)', async () => {
+    await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+    });
+
+    expect(loggerWarnSpy).not.toHaveBeenCalledWith(
+      EventName.CONTAINER_CREDENTIALS_RW_OVERRIDE,
+      expect.anything(),
+    );
+  });
+
+  // 22.1: explicit mountClaudeConfigReadonly: true produces read-only mount
+  it('mounts ~/.claude/ directory as read-only when mountClaudeConfigReadonly is explicitly true', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfigReadonly: true,
+    });
+
+    const claudeDirMount = result.mounts.find((m) => m.target.endsWith('/.claude'));
+    expect(claudeDirMount).toBeDefined();
+    expect(claudeDirMount!.readonly).toBe(true);
+  });
+
+  // 22.1: .claude.json file mount remains read-write regardless of mountClaudeConfigReadonly
+  it('keeps .claude.json file mount as read-write even when mountClaudeConfigReadonly is true', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfigReadonly: true,
+    });
+
+    const claudeJsonMount = result.mounts.find((m) => m.target.endsWith('.claude.json'));
+    expect(claudeJsonMount).toBeDefined();
+    expect(claudeJsonMount!.readonly).toBe(false);
+  });
+
+  // 22.1: mountClaudeConfigReadonly has no effect when mountClaudeConfig is false
+  it('mountClaudeConfigReadonly has no effect when mountClaudeConfig is false (no mounts produced)', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfig: false,
+      mountClaudeConfigReadonly: false,
+    });
+
+    expect(result.mounts).toHaveLength(0);
+    // No warning should be emitted either (no credential mount to be read-write)
+    expect(loggerWarnSpy).not.toHaveBeenCalledWith(
+      EventName.CONTAINER_CREDENTIALS_RW_OVERRIDE,
+      expect.anything(),
+    );
+  });
+
+  // 22.1 [AI-Review][Low]: warning fires even when credentials file does not exist (unconditional)
+  it('logs CONTAINER_CREDENTIALS_RW_OVERRIDE when mountClaudeConfigReadonly is false and credentials are missing', async () => {
+    // Both access() calls reject — credentials file is absent
+    mockAccess.mockRejectedValue(new Error('ENOENT'));
+
+    await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfigReadonly: false,
+    });
+
+    // Warning must fire unconditionally regardless of credential file presence
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
+      EventName.CONTAINER_CREDENTIALS_RW_OVERRIDE,
+      expect.objectContaining({
+        message: expect.stringContaining('read-write'),
+      }),
+    );
+  });
+
+  // 22.1: read-only mount with custom containerHome
+  it('read-only mount uses custom containerHome for mount target', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      containerHome: '/home/node',
+      mountClaudeConfigReadonly: true,
+    });
+
+    const claudeDirMount = result.mounts.find((m) => m.target === '/home/node/.claude');
+    expect(claudeDirMount).toBeDefined();
+    expect(claudeDirMount!.readonly).toBe(true);
   });
 
   // 10.10 Low: String(err) catch branch — non-Error thrown value exercises String(err) path

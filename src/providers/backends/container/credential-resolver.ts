@@ -29,6 +29,14 @@ export interface CredentialResolverOptions {
   containerHome?: string;
   /** When false, skip ~/.claude/ credential mounts entirely (Story 12.2). Default: true. */
   mountClaudeConfig?: boolean;
+  /**
+   * When true (default), mount `~/.claude/` read-only to prevent container processes from
+   * modifying or tampering with OAuth credentials (Story 22.1).
+   * When false, mount read-write (reverts to pre-v1.1 behaviour); a `warn`-level log is
+   * emitted unconditionally whenever this is set to false, regardless of whether credentials
+   * currently exist on disk. Set via `mount_claude_config_readonly: false` in config.
+   */
+  mountClaudeConfigReadonly?: boolean;
 }
 
 /** Return type describing mounts and env vars to add to the container. */
@@ -47,6 +55,7 @@ export async function resolveContainerCredentials(
 ): Promise<ContainerCredentials> {
   const containerHome = options?.containerHome ?? CONTAINER_HOME;
   const mountClaudeConfig = options?.mountClaudeConfig ?? true;
+  const mountReadonly = options?.mountClaudeConfigReadonly ?? true;
 
   // When mountClaudeConfig is false, skip all credential/settings file probes (Story 12.2 AC5/6.3)
   if (!mountClaudeConfig) {
@@ -54,6 +63,21 @@ export async function resolveContainerCredentials(
       mounts: [],
       env: { HOME: containerHome },
     };
+  }
+
+  // Emit the security warning unconditionally when the readonly override is disabled —
+  // regardless of whether credentials currently exist on disk. If the user has set
+  // mount_claude_config_readonly: false, the security implication applies whether or not
+  // the .credentials.json file is currently present (it may appear later or be probed).
+  if (!mountReadonly) {
+    logger
+      .warn(EventName.CONTAINER_CREDENTIALS_RW_OVERRIDE, {
+        message:
+          'Credential mount is read-write (mount_claude_config_readonly: false). A compromised container process could modify OAuth credentials.',
+      })
+      .catch(() => {
+        // Ignore logger errors (e.g. full disk) — security warning is best-effort
+      });
   }
 
   try {
@@ -83,7 +107,7 @@ export async function resolveContainerCredentials(
       mounts.push({
         source: hostClaudeDir,
         target: containerClaudeDir,
-        readonly: false,
+        readonly: mountReadonly,
       });
     } else {
       // Debug-level log -- the user-facing warn is emitted by ContainerExecutionBackend.execute()

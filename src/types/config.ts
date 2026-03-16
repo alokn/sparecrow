@@ -40,6 +40,8 @@ export type ContainerConfig = {
   cpuLimit: number;
   networkMode: 'bridge' | 'none' | 'host';
   mountClaudeConfig: boolean;
+  /** When true, mount ~/.claude/ read-only to prevent container writes to OAuth credentials (Story 22.1). Default: true. */
+  mountClaudeConfigReadonly: boolean;
   /** Container-side path to a pre-installed claude binary. When set, skips auto-mounting from host. */
   claudeBinaryPath?: string;
   /** Explicit override for host binary mounting. true = force mount, false = skip mount, undefined = auto-detect based on image. */
@@ -63,4 +65,5 @@ export interface ScrowConfig {
   trigger: TriggerConfig;
   tasks: CustomTaskConfig[]; // custom prompts (Story 3.4)
   lastSummaryEnabled: boolean; // write last-summary.txt after dispatch (last-summary.json unchanged); default false
+  wslMountPrefix: string; // WSL Windows-hosted mount prefix for permission-check bypass; default '/mnt/'
 }

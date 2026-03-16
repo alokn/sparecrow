@@ -85,6 +85,7 @@ function createMockRuntime(overrides?: {
         : opts.removeThrows
           ? vi.fn().mockRejectedValue(new Error('remove failed'))
           : vi.fn().mockResolvedValue(undefined),
+    runInteractive: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
     stats: vi.fn().mockResolvedValue(null),
     list: vi.fn().mockResolvedValue(opts.listResult),
   };

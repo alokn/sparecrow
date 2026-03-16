@@ -250,6 +250,7 @@ describe('createClaudeCodeProvider', () => {
       cpuLimit: 2.0,
       networkMode: 'none' as const,
       mountClaudeConfig: false,
+      mountClaudeConfigReadonly: true,
     };
     await createClaudeCodeProvider(
       makeConfig({
@@ -283,6 +284,7 @@ describe('createClaudeCodeProvider', () => {
       cpuLimit: 1.0,
       networkMode: 'bridge' as const,
       mountClaudeConfig: true,
+      mountClaudeConfigReadonly: true,
     };
     await validateClaudeCodeBackend(
       makeConfig({

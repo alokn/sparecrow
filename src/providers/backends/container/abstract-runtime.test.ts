@@ -3,11 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
-/** Creates a mock child process with stdout/stderr PassThrough streams. */
+/** Creates a mock child process with stdout/stderr PassThrough streams and a stdin stream. */
 function createMockChild(): {
   child: EventEmitter & {
     stdout: PassThrough;
     stderr: PassThrough;
+    stdin: PassThrough;
     pid: number;
     kill: ReturnType<typeof vi.fn>;
   };
@@ -19,11 +20,13 @@ function createMockChild(): {
   const child = new EventEmitter() as EventEmitter & {
     stdout: PassThrough;
     stderr: PassThrough;
+    stdin: PassThrough;
     pid: number;
     kill: ReturnType<typeof vi.fn>;
   };
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
   child.pid = 12345;
   child.kill = vi.fn(() => true);
 
@@ -87,6 +90,12 @@ describe('AbstractContainerRuntime', () => {
       }
       testExecOrThrow(binary: string, args: string[], timeoutMs?: number) {
         return this.execOrThrow(binary, args, timeoutMs);
+      }
+      testExecWithStdin(binary: string, args: string[], stdinData: string, timeoutMs?: number) {
+        return this.execWithStdin(binary, args, stdinData, timeoutMs);
+      }
+      testBuildInteractiveRunArgs(options: Parameters<typeof this.buildInteractiveRunArgs>[0]) {
+        return this.buildInteractiveRunArgs(options);
       }
     }
 
@@ -743,6 +752,210 @@ describe('AbstractContainerRuntime', () => {
       const result = await runtime.list({ all: true });
       expect(result).toHaveLength(1);
       expect(result[0]!.containerId).toBe('abc123');
+    });
+  });
+
+  // ── Story 22.2: execWithStdin tests ─────────────────────────────────────────
+
+  describe('execWithStdin()', () => {
+    it('writes stdinData to child stdin and captures output', async () => {
+      const { child } = createMockChild();
+      const stdinWriteSpy = vi.spyOn(child.stdin, 'write');
+      const stdinEndSpy = vi.spyOn(child.stdin, 'end');
+
+      spawnMock.mockImplementation(() => {
+        process.nextTick(() => {
+          child.stdout.push(Buffer.from('output from stdin\n', 'utf-8'));
+          child.emit('close', 0);
+        });
+        return child;
+      });
+
+      const runtime = await createTestRuntime();
+      const result = await runtime.testExecWithStdin('test-binary', ['--print'], 'my prompt');
+
+      // write() is now called with an error callback as the 3rd arg — use expect.anything()
+      expect(stdinWriteSpy).toHaveBeenCalledWith('my prompt', 'utf-8', expect.any(Function));
+      expect(stdinEndSpy).toHaveBeenCalled();
+      expect(result.stdout).toBe('output from stdin\n');
+      expect(result.exitCode).toBe(0);
+      expect(result.enoent).toBe(false);
+    });
+
+    it('resolves with enoent: true on ENOENT error', async () => {
+      mockSpawnResult({ enoent: true });
+      const runtime = await createTestRuntime();
+      const result = await runtime.testExecWithStdin('nonexistent', ['arg'], 'data');
+
+      expect(result.enoent).toBe(true);
+      expect(result.exitCode).toBeNull();
+    });
+
+    it('resolves with null exitCode on timeout', async () => {
+      const { child } = createMockChild();
+      spawnMock.mockImplementation(() => child);
+
+      const runtime = await createTestRuntime();
+      const result = await runtime.testExecWithStdin('test-binary', ['arg'], 'data', 50);
+
+      expect(result.exitCode).toBeNull();
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+  });
+
+  // ── Story 22.2: buildInteractiveRunArgs tests ──────────────────────────────
+
+  describe('buildInteractiveRunArgs()', () => {
+    it('uses -i and --rm flags instead of --detach', async () => {
+      mockSpawnResult({ stdout: 'container-id\n', exitCode: 0 });
+      const runtime = await createTestRuntime();
+
+      const args = runtime.testBuildInteractiveRunArgs({
+        image: 'node:lts-slim',
+        command: ['claude', '--print'],
+        cwd: '/workspace',
+        env: { HOME: '/home/node' },
+        mounts: [],
+      });
+
+      expect(args).toContain('-i');
+      expect(args).toContain('--rm');
+      expect(args).not.toContain('--detach');
+    });
+
+    it('includes all standard container options (mounts, env, limits)', async () => {
+      mockSpawnResult({ stdout: '', exitCode: 0 });
+      const runtime = await createTestRuntime();
+
+      const args = runtime.testBuildInteractiveRunArgs({
+        image: 'node:lts-slim',
+        command: ['claude', '--print'],
+        cwd: '/workspace',
+        env: { HOME: '/home/node', PATH: '/usr/bin' },
+        mounts: [{ source: '/host/repo', target: '/workspace', readonly: false }],
+        memoryLimitMb: 512,
+        cpuLimit: 1.0,
+        networkMode: 'bridge',
+        capDrop: ['ALL'],
+        securityOpts: ['no-new-privileges'],
+      });
+
+      expect(args).toContain('--volume');
+      expect(args).toContain('/host/repo:/workspace');
+      expect(args).toContain('--memory');
+      expect(args).toContain('512m');
+      expect(args).toContain('--cpus');
+      expect(args).toContain('--network');
+      expect(args).toContain('--cap-drop');
+      expect(args).toContain('--security-opt');
+    });
+  });
+
+  // ── Story 22.2: runInteractive tests ───────────────────────────────────────
+
+  describe('runInteractive()', () => {
+    it('returns stdout, stderr, and exitCode from interactive run', async () => {
+      const { child } = createMockChild();
+      const stdinWriteSpy = vi.spyOn(child.stdin, 'write');
+
+      spawnMock.mockImplementation(() => {
+        process.nextTick(() => {
+          child.stdout.push(Buffer.from('result output\n', 'utf-8'));
+          child.stderr.push(Buffer.from('debug info\n', 'utf-8'));
+          child.emit('close', 0);
+        });
+        return child;
+      });
+
+      const runtime = await createTestRuntime();
+      const result = await runtime.runInteractive(
+        {
+          image: 'node:lts-slim',
+          command: ['claude', '--print'],
+          cwd: '/workspace',
+          env: {},
+          mounts: [],
+        },
+        'task prompt via stdin',
+        30000,
+      );
+
+      // write() is now called with an error callback as the 3rd arg
+      expect(stdinWriteSpy).toHaveBeenCalledWith(
+        'task prompt via stdin',
+        'utf-8',
+        expect.any(Function),
+      );
+      expect(result.stdout).toBe('result output\n');
+      expect(result.stderr).toBe('debug info\n');
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('throws CONTAINER_RUNTIME_ERROR on ENOENT', async () => {
+      mockSpawnResult({ enoent: true });
+      const runtime = await createTestRuntime();
+
+      await expect(
+        runtime.runInteractive(
+          {
+            image: 'node:lts-slim',
+            command: ['claude', '--print'],
+            cwd: '/workspace',
+            env: {},
+            mounts: [],
+          },
+          'prompt',
+          30000,
+        ),
+      ).rejects.toMatchObject({ code: 'CONTAINER_RUNTIME_ERROR' });
+    });
+
+    it('throws TASK_TIMEOUT when container does not exit in time', async () => {
+      const { child } = createMockChild();
+      spawnMock.mockImplementation(() => child);
+
+      const runtime = await createTestRuntime();
+
+      await expect(
+        runtime.runInteractive(
+          {
+            image: 'node:lts-slim',
+            command: ['claude', '--print'],
+            cwd: '/workspace',
+            env: {},
+            mounts: [],
+          },
+          'prompt',
+          50,
+        ),
+      ).rejects.toMatchObject({ code: 'TASK_TIMEOUT' });
+    });
+
+    it('returns non-zero exit code without throwing', async () => {
+      const { child } = createMockChild();
+      spawnMock.mockImplementation(() => {
+        process.nextTick(() => {
+          child.stderr.push(Buffer.from('error output\n', 'utf-8'));
+          child.emit('close', 1);
+        });
+        return child;
+      });
+
+      const runtime = await createTestRuntime();
+      const result = await runtime.runInteractive(
+        {
+          image: 'node:lts-slim',
+          command: ['claude', '--print'],
+          cwd: '/workspace',
+          env: {},
+          mounts: [],
+        },
+        'prompt',
+        30000,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe('error output\n');
     });
   });
 });

@@ -814,13 +814,6 @@ describe('ClaudeCodeAuthManager', () => {
   it('skips permission check on WSL-mounted credential paths', async () => {
     vi.resetModules();
 
-    // WSL is by definition a Linux environment — stub only process.platform so
-    // that shouldSkipPermissionCheck() works on macOS CI too. Spreading the live
-    // `process` object is unsafe (loses non-enumerable props and live getters),
-    // so we use Object.defineProperty to patch only the single property we need.
-    const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-
     const fsWslMock = {
       access: vi.fn().mockResolvedValue(undefined),
       stat: vi.fn().mockResolvedValue({ mode: 0o100644 }),
@@ -833,6 +826,16 @@ describe('ClaudeCodeAuthManager', () => {
       error: vi.fn(),
     };
 
+    // Mock the platform barrel so that isWslWindowsPath is fully controlled here,
+    // avoiding an ESM module-evaluation race where process.platform patch and platform
+    // module re-import could resolve in an unpredictable order.
+    vi.doMock('../../platform/index.js', () => ({
+      isWslWindowsPath: (_path: string) => true,
+      isMacOS: () => false,
+      isLinux: () => true,
+      getPaths: vi.fn(),
+      ensureDirectories: vi.fn(),
+    }));
     vi.doMock('node:fs/promises', () => fsWslMock);
     vi.doMock('node:os', () => ({ homedir: () => '/mnt/c/Users/test' }));
     vi.doMock('../../utils/index.js', () => ({
@@ -856,12 +859,61 @@ describe('ClaudeCodeAuthManager', () => {
         expect.anything(),
       );
     } finally {
-      // Restore process.platform and clear module registry so doMock leaks
-      // don't propagate into the next describe block.
-      // originalDescriptor is always defined for the built-in process.platform property.
-      if (originalDescriptor !== undefined) {
-        Object.defineProperty(process, 'platform', originalDescriptor);
-      }
+      vi.resetModules();
+    }
+  });
+
+  it('enforces permission check on POSIX-native paths within WSL', async () => {
+    vi.resetModules();
+
+    const fsWslNativeMock = {
+      access: vi.fn().mockResolvedValue(undefined),
+      stat: vi.fn().mockResolvedValue({ mode: 0o100644 }),
+      readFile: vi.fn().mockResolvedValue(createCredentialsJson()),
+    };
+    const loggerWslNativeMock = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    // Mock the platform barrel so isWslWindowsPath returns false for POSIX-native paths,
+    // ensuring the permission check is enforced deterministically regardless of CI platform.
+    vi.doMock('../../platform/index.js', () => ({
+      isWslWindowsPath: (_path: string) => false,
+      isMacOS: () => false,
+      isLinux: () => true,
+      getPaths: vi.fn(),
+      ensureDirectories: vi.fn(),
+    }));
+    vi.doMock('node:fs/promises', () => fsWslNativeMock);
+    vi.doMock('node:os', () => ({ homedir: () => '/home/wsluser' }));
+    vi.doMock('../../utils/index.js', () => ({
+      logger: loggerWslNativeMock,
+      retryWithBackoff: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+      atomicWrite: vi.fn(),
+      isRecord: (value: unknown) =>
+        typeof value === 'object' && value !== null && !Array.isArray(value),
+      VERSION: 'test',
+    }));
+
+    try {
+      const { ClaudeCodeAuthManager: NativeAuthManager } = await import('./auth-manager.js');
+      const authMgr = new NativeAuthManager();
+
+      await authMgr.getToken();
+
+      // Permission check SHOULD run for POSIX-native paths (stat is called)
+      expect(fsWslNativeMock.stat).toHaveBeenCalled();
+      // Warn about insecure permissions (mode 0644 != 0600)
+      expect(loggerWslNativeMock.warn).toHaveBeenCalledWith(
+        'AUTH_CREDENTIALS_PERMISSIONS_OPEN',
+        expect.objectContaining({
+          expectedMode: '0600',
+        }),
+      );
+    } finally {
       vi.resetModules();
     }
   });

@@ -122,6 +122,7 @@ const makeConfig = (overrides: Partial<ScrowConfig> = {}): ScrowConfig => ({
   },
   tasks: [],
   lastSummaryEnabled: false,
+  wslMountPrefix: '/mnt/',
   ...overrides,
 });
 
@@ -2840,6 +2841,7 @@ describe('PollingLoop — buildTriggerState new fields (Story 15.6)', () => {
         trigger: { maxWastePercentage: 50, weeklyReservePercentage: 30, idleHours: [] },
         tasks: [],
         lastSummaryEnabled: false,
+        wslMountPrefix: '/mnt/',
       }),
       startedAt: new Date().toISOString(),
     });

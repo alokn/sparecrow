@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { ScrowError, ErrorCode } from '../../errors/index.js';
 import type { AuthManager } from '../../types/index.js';
 import { atomicWrite, isRecord, logger, retryWithBackoff, VERSION } from '../../utils/index.js';
+import { isWslWindowsPath } from '../../platform/index.js';
 
 /** Subscription metadata read from the credentials file. */
 export interface SubscriptionMetadata {
@@ -77,6 +78,11 @@ export class ClaudeCodeAuthManager implements AuthManager {
   private lastRefreshAt: Date | null = null;
   private lastRefreshFailedAt: Date | null = null;
   private tokenExpiresAt: Date | null = null;
+  private readonly wslMountPrefix: string | undefined;
+
+  constructor(options?: { wslMountPrefix?: string }) {
+    this.wslMountPrefix = options?.wslMountPrefix;
+  }
 
   async getToken(): Promise<string> {
     await this.ensureCredentialFileExists(CREDENTIALS_PATH);
@@ -279,7 +285,7 @@ export class ClaudeCodeAuthManager implements AuthManager {
     if (process.platform === 'win32') {
       return true;
     }
-    return process.platform === 'linux' && filePath.startsWith('/mnt/');
+    return isWslWindowsPath(filePath, this.wslMountPrefix);
   }
 
   private async readCredentials(filePath: string): Promise<ParsedCredentials> {

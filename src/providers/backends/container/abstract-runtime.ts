@@ -10,6 +10,7 @@ import type {
   RuntimeInfo,
   ContainerListFilter,
   ContainerListEntry,
+  InteractiveRunResult,
 } from './runtime.js';
 
 /** Default timeout in milliseconds for short-lived management commands. */
@@ -41,13 +42,17 @@ export abstract class AbstractContainerRuntime implements ContainerRuntime {
   abstract info(): Promise<RuntimeInfo>;
 
   /**
-   * Spawns a subprocess and captures its output.
+   * Shared spawn-and-capture implementation used by both exec() and execWithStdin().
+   * Spawns the binary, wires up timeout/settle/ENOENT handling, then optionally
+   * writes stdinData to the child's stdin before closing it.
    * On ENOENT (binary not found), resolves with enoent: true instead of rejecting.
-   * Default timeout: 30 000 ms for management commands.
    */
-  protected exec(binary: string, args: string[], timeoutMs?: number): Promise<ExecResult> {
-    const timeout = timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
-
+  private _spawnCapture(
+    binary: string,
+    args: string[],
+    timeout: number,
+    stdinData?: string,
+  ): Promise<ExecResult> {
     return new Promise((resolve) => {
       let settled = false;
       let stdoutChunks = '';
@@ -101,7 +106,45 @@ export abstract class AbstractContainerRuntime implements ContainerRuntime {
         }
         // Other errors (e.g. EPERM): let 'close' resolve the promise
       });
+
+      // Write stdin data and close the stream when provided.
+      // Pass an error callback to write() so EPIPE and other write errors
+      // (e.g., child exits immediately after spawn) trigger settle() with
+      // whatever exit code is available rather than silently swallowing the error.
+      if (stdinData !== undefined && child.stdin) {
+        child.stdin.write(stdinData, 'utf-8', (writeErr) => {
+          if (writeErr && !settled) {
+            // The child stream errored — close will still fire (or already fired),
+            // but we resolve with whatever we have so the caller isn't left hanging.
+            settle(null, false);
+          }
+        });
+        child.stdin.end();
+      }
     });
+  }
+
+  /**
+   * Spawns a subprocess and captures its output.
+   * On ENOENT (binary not found), resolves with enoent: true instead of rejecting.
+   * Default timeout: 30 000 ms for management commands.
+   */
+  protected exec(binary: string, args: string[], timeoutMs?: number): Promise<ExecResult> {
+    return this._spawnCapture(binary, args, timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
+  }
+
+  /**
+   * Spawns a subprocess with data piped to stdin and captures its output.
+   * Writes stdinData to the child's stdin then closes the stream.
+   * On ENOENT (binary not found), resolves with enoent: true instead of rejecting.
+   */
+  protected execWithStdin(
+    binary: string,
+    args: string[],
+    stdinData: string,
+    timeoutMs?: number,
+  ): Promise<ExecResult> {
+    return this._spawnCapture(binary, args, timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, stdinData);
   }
 
   /**
@@ -153,6 +196,42 @@ export abstract class AbstractContainerRuntime implements ContainerRuntime {
     const result = await this.execOrThrow(this.binary, args);
     const containerId = result.stdout.trim();
     return { containerId };
+  }
+
+  /**
+   * Runs a container interactively with stdin data piped in.
+   * Uses `-i --rm` instead of `--detach` to support stdin piping.
+   * Returns stdout, stderr, and exit code directly.
+   * The container is automatically removed on exit (--rm).
+   */
+  async runInteractive(
+    options: ContainerRunOptions,
+    stdinData: string,
+    timeoutMs: number,
+  ): Promise<InteractiveRunResult> {
+    const args = this.buildInteractiveRunArgs(options);
+    const result = await this.execWithStdin(this.binary, args, stdinData, timeoutMs);
+
+    if (result.enoent) {
+      throw new ScrowError(
+        ErrorCode.CONTAINER_RUNTIME_ERROR,
+        `Container runtime binary '${this.binary}' not found on PATH.`,
+      );
+    }
+
+    if (result.exitCode === null) {
+      // exitCode is null and not ENOENT (already handled above) — the container timed out
+      throw new ScrowError(
+        ErrorCode.TASK_TIMEOUT,
+        `Interactive container did not exit within ${timeoutMs}ms.`,
+      );
+    }
+
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+    };
   }
 
   /**
@@ -330,10 +409,25 @@ export abstract class AbstractContainerRuntime implements ContainerRuntime {
     return entries;
   }
 
+  /**
+   * Builds `docker/podman run -i --rm` args from ContainerRunOptions.
+   * Used for interactive mode with stdin piping. Unlike buildRunArgs,
+   * this does NOT use --detach and adds -i for stdin passthrough and --rm for cleanup.
+   * Protected: internal implementation detail — not part of the ContainerRuntime interface.
+   */
+  protected buildInteractiveRunArgs(options: ContainerRunOptions): string[] {
+    const args: string[] = ['run', '-i', '--rm'];
+    return this.appendRunOptions(args, options);
+  }
+
   /** Builds `docker/podman run --detach` args from ContainerRunOptions. */
   private buildRunArgs(options: ContainerRunOptions): string[] {
     const args: string[] = ['run', '--detach'];
+    return this.appendRunOptions(args, options);
+  }
 
+  /** Appends common container run options (user, workdir, env, mounts, etc.) to args. */
+  private appendRunOptions(args: string[], options: ContainerRunOptions): string[] {
     if (options.user !== undefined) {
       args.push('--user', options.user);
     }

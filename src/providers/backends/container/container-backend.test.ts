@@ -12,6 +12,7 @@ function createMockRuntime(overrides: Partial<ContainerRuntime> = {}): Container
     available: vi.fn().mockResolvedValue(true),
     info: vi.fn().mockResolvedValue({ version: '1.0.0', rootless: true }),
     run: vi.fn().mockResolvedValue({ containerId: 'test-container-123' }),
+    runInteractive: vi.fn().mockResolvedValue({ stdout: 'output', stderr: '', exitCode: 0 }),
     wait: vi.fn().mockResolvedValue({ exitCode: 0, oomKilled: false }),
     logs: vi.fn().mockResolvedValue({ stdout: 'output', stderr: '' }),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -1032,6 +1033,7 @@ describe('ContainerExecutionBackend', () => {
       cpuLimit: 1.0,
       networkMode: 'bridge',
       mountClaudeConfig: true,
+      mountClaudeConfigReadonly: true,
     });
 
     await backend.execute('claude', ['--print', 'test'], makeOptions());
@@ -2195,6 +2197,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.execute('claude', ['--print', 'test'], makeOptions());
@@ -3507,6 +3510,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 2.0,
         networkMode: 'none',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.execute('claude', ['--print', 'test'], makeOptions());
@@ -3554,6 +3558,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.execute('claude', ['--print', 'test'], makeOptions());
@@ -3640,6 +3645,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: false,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.execute('claude', ['--print', 'test'], makeOptions());
@@ -3690,6 +3696,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: false,
+        mountClaudeConfigReadonly: true,
       });
 
       // Execute without ANTHROPIC_API_KEY in env
@@ -3735,6 +3742,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.available();
@@ -3774,6 +3782,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       // Call execute() directly without calling available() first (cache is cold)
@@ -3781,6 +3790,49 @@ describe('ContainerExecutionBackend', () => {
 
       expect(localDetect).toHaveBeenCalledWith('docker');
       expect(localDetect).toHaveBeenCalledTimes(1);
+    });
+
+    // 22.1: backend passes mountClaudeConfigReadonly: false through to credential resolver
+    it('passes mountClaudeConfigReadonly: false through to resolveContainerCredentials', async () => {
+      const mockRuntime = createMockRuntime();
+      vi.resetModules();
+      vi.doMock('./detect-runtime.js', () => ({
+        detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+      }));
+      const mockResolveCredentials = vi.fn().mockResolvedValue(defaultCredentials);
+      vi.doMock('./credential-resolver.js', () => ({
+        resolveContainerCredentials: mockResolveCredentials,
+      }));
+      vi.doMock('./binary-resolver.js', () => ({
+        resolveBinaryMount: vi.fn().mockResolvedValue(null),
+      }));
+      vi.doMock('../../../utils/index.js', () => ({
+        logger: {
+          info: vi.fn().mockResolvedValue(undefined),
+          warn: vi.fn().mockResolvedValue(undefined),
+          error: vi.fn().mockResolvedValue(undefined),
+          debug: vi.fn().mockResolvedValue(undefined),
+        },
+        boundOutput: realBoundOutput,
+        MAX_OUTPUT_BYTES: REAL_MAX_OUTPUT_BYTES,
+        MAX_OUTPUT_BYTES_SUCCESS: REAL_MAX_OUTPUT_BYTES_SUCCESS,
+      }));
+      const mod = await import('./container-backend.js');
+      const backend = new mod.ContainerExecutionBackend({
+        runtime: 'auto',
+        image: 'ubuntu:22.04',
+        memoryLimitMb: 512,
+        cpuLimit: 1.0,
+        networkMode: 'bridge',
+        mountClaudeConfig: true,
+        mountClaudeConfigReadonly: false,
+      });
+
+      await backend.execute('claude', ['--print', 'test'], makeOptions());
+
+      expect(mockResolveCredentials).toHaveBeenCalledWith(
+        expect.objectContaining({ mountClaudeConfigReadonly: false }),
+      );
     });
   });
 
@@ -4036,6 +4088,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
 
         claudeBinaryPath: '/usr/local/bin/claude-preinstalled',
       });
@@ -4174,6 +4227,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
       const result = backend.shouldMountBinary();
       expect(result.shouldMount).toBe(false);
@@ -4189,6 +4243,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
       const result = backend.shouldMountBinary();
       expect(result.shouldMount).toBe(true);
@@ -4212,6 +4267,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
 
         mountClaudeBinary: true,
       });
@@ -4229,6 +4285,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
 
         mountClaudeBinary: false,
       });
@@ -4252,6 +4309,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
       expect(backend.mountStrategy).toBe('image-builtin');
     });
@@ -4292,6 +4350,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.execute(
@@ -4350,6 +4409,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
 
         mountClaudeBinary: true,
       });
@@ -4396,6 +4456,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
 
         mountClaudeBinary: false,
       });
@@ -4444,6 +4505,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
       });
 
       await backend.execute('claude', ['--print', 'test'], makeOptions());
@@ -4541,6 +4603,7 @@ describe('ContainerExecutionBackend', () => {
         cpuLimit: 1.0,
         networkMode: 'bridge',
         mountClaudeConfig: true,
+        mountClaudeConfigReadonly: true,
 
         claudeBinaryPath: '/usr/local/bin/claude-preinstalled',
       });
@@ -4985,5 +5048,217 @@ describe('ContainerExecutionBackend', () => {
     expect(executeResult.exitCode).toBe(0);
     // Runtime detection should only be called once (cached promise shared)
     expect(concurrentDetect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Story 22.2: Stdin pipe for task prompts ───────────────────────────────────
+
+describe('ContainerExecutionBackend — stdin pipe (Story 22.2)', () => {
+  it('uses runInteractive when stdinData is provided in options', async () => {
+    const mockRuntime = createMockRuntime({
+      runInteractive: vi
+        .fn()
+        .mockResolvedValue({ stdout: 'stdin output', stderr: '', exitCode: 0 }),
+    });
+
+    vi.resetModules();
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    const result = await backend.execute(
+      'claude',
+      ['--print'],
+      makeOptions({ stdinData: 'task prompt' }),
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('stdin output');
+    // runInteractive should have been called, not run
+    expect(mockRuntime.runInteractive).toHaveBeenCalledOnce();
+    expect(mockRuntime.run).not.toHaveBeenCalled();
+  });
+
+  it('does NOT use runInteractive when stdinData is absent', async () => {
+    const mockRuntime = createMockRuntime();
+
+    vi.resetModules();
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    await backend.execute('claude', ['--print', 'prompt'], makeOptions());
+
+    // Standard detach path should be used
+    expect(mockRuntime.run).toHaveBeenCalledOnce();
+    expect(mockRuntime.runInteractive).not.toHaveBeenCalled();
+  });
+
+  it('returns timedOut: true when runInteractive throws TASK_TIMEOUT', async () => {
+    vi.resetModules();
+
+    // Import errors AFTER reset so instanceof checks match
+    const { ScrowError: ScrowErrorClass, ErrorCode: EC } = await import('../../../errors/index.js');
+
+    const mockRuntime = createMockRuntime({
+      runInteractive: vi
+        .fn()
+        .mockRejectedValue(new ScrowErrorClass(EC.TASK_TIMEOUT, 'Container timed out')),
+    });
+
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    const result = await backend.execute(
+      'claude',
+      ['--print'],
+      makeOptions({ stdinData: 'prompt', timeoutMs: 100 }),
+    );
+
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBeNull();
+  });
+
+  it('propagates non-timeout errors from runInteractive', async () => {
+    vi.resetModules();
+
+    const { ScrowError: ScrowErrorClass, ErrorCode: EC } = await import('../../../errors/index.js');
+
+    const mockRuntime = createMockRuntime({
+      runInteractive: vi
+        .fn()
+        .mockRejectedValue(new ScrowErrorClass(EC.CONTAINER_RUNTIME_ERROR, 'Runtime crashed')),
+    });
+
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    await expect(
+      backend.execute('claude', ['--print'], makeOptions({ stdinData: 'prompt' })),
+    ).rejects.toMatchObject({ code: 'CONTAINER_RUNTIME_ERROR' });
+  });
+
+  it('calls onChunk with stdout and stderr output when stdinData is provided', async () => {
+    // Regression guard: onChunk must NOT be silently dropped in the interactive stdin path.
+    const mockRuntime = createMockRuntime({
+      runInteractive: vi.fn().mockResolvedValue({
+        stdout: 'task result output',
+        stderr: 'task stderr info',
+        exitCode: 0,
+      }),
+    });
+
+    vi.resetModules();
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    const chunks: Array<{ chunk: string; stream: 'stdout' | 'stderr' }> = [];
+    const onChunk = (chunk: string, stream: 'stdout' | 'stderr'): void => {
+      chunks.push({ chunk, stream });
+    };
+
+    await backend.execute('claude', ['--print'], makeOptions({ stdinData: 'prompt', onChunk }));
+
+    // Both stdout and stderr chunks must have been forwarded to onChunk
+    expect(
+      chunks.some((c) => c.stream === 'stdout' && c.chunk.includes('task result output')),
+    ).toBe(true);
+    expect(chunks.some((c) => c.stream === 'stderr' && c.chunk.includes('task stderr info'))).toBe(
+      true,
+    );
+  });
+
+  it('returns aborted: true when signal fires before runInteractive resolves', async () => {
+    const controller = new AbortController();
+
+    const mockRuntime = createMockRuntime({
+      runInteractive: vi.fn().mockImplementation(
+        () =>
+          new Promise<never>(() => {
+            // Never resolves — aborted by signal
+          }),
+      ),
+    });
+
+    vi.resetModules();
+    vi.doMock('./detect-runtime.js', () => ({
+      detectContainerRuntime: vi.fn().mockResolvedValue(mockRuntime),
+    }));
+    vi.doMock('./credential-resolver.js', () => ({
+      resolveContainerCredentials: vi.fn().mockResolvedValue(defaultCredentials),
+    }));
+    vi.doMock('./binary-resolver.js', () => ({
+      resolveBinaryMount: vi.fn().mockResolvedValue(null),
+    }));
+    mockStandardUtilsModule();
+
+    const mod = await import('./container-backend.js');
+    const backend = new mod.ContainerExecutionBackend();
+
+    const executePromise = backend.execute(
+      'claude',
+      ['--print'],
+      makeOptions({ stdinData: 'prompt', signal: controller.signal }),
+    );
+
+    // Fire abort after scheduling
+    controller.abort();
+
+    const result = await executePromise;
+    expect(result.aborted).toBe(true);
+    expect(result.exitCode).toBeNull();
   });
 });

@@ -82,6 +82,7 @@ describe('ScrowConfigSchema — container config', () => {
       cpuLimit: 2.0,
       networkMode: 'none',
       mountClaudeConfig: false,
+      mountClaudeConfigReadonly: true,
     });
   });
 
@@ -119,6 +120,7 @@ describe('ScrowConfigSchema — container config', () => {
       cpuLimit: 1.0,
       networkMode: 'bridge',
       mountClaudeConfig: true,
+      mountClaudeConfigReadonly: true,
     });
   });
 
@@ -250,6 +252,7 @@ describe('ScrowConfigSchema — container config', () => {
       cpuLimit: 1.0,
       networkMode: 'bridge',
       mountClaudeConfig: true,
+      mountClaudeConfigReadonly: true,
     });
   });
 
@@ -323,6 +326,7 @@ describe('ScrowConfigSchema — container claude_binary_path', () => {
       cpuLimit: 1.0,
       networkMode: 'bridge',
       mountClaudeConfig: true,
+      mountClaudeConfigReadonly: true,
       claudeBinaryPath: '/opt/claude/cli.js',
     });
   });
@@ -457,6 +461,7 @@ describe('ScrowConfigSchema — container mount_claude_binary', () => {
       cpuLimit: 2.0,
       networkMode: 'bridge',
       mountClaudeConfig: true,
+      mountClaudeConfigReadonly: true,
       mountClaudeBinary: false,
     });
   });
@@ -469,6 +474,75 @@ describe('ScrowConfigSchema — container mount_claude_binary', () => {
       },
     });
     expect('mountClaudeBinary' in result.provider.container!).toBe(false);
+  });
+});
+
+describe('ScrowConfigSchema — container mount_claude_config_readonly', () => {
+  // 22.1 AC4: defaults to true when not specified
+  it('defaults mount_claude_config_readonly to true', () => {
+    const result = ScrowConfigSchema.parse({
+      provider: { container: {} },
+    });
+    expect(result.provider.container!.mountClaudeConfigReadonly).toBe(true);
+  });
+
+  // 22.1 AC4: explicit false is accepted
+  it('parses mount_claude_config_readonly: false', () => {
+    const result = ScrowConfigSchema.parse({
+      provider: { container: { mount_claude_config_readonly: false } },
+    });
+    expect(result.provider.container!.mountClaudeConfigReadonly).toBe(false);
+  });
+
+  // 22.1: explicit true is accepted
+  it('parses mount_claude_config_readonly: true', () => {
+    const result = ScrowConfigSchema.parse({
+      provider: { container: { mount_claude_config_readonly: true } },
+    });
+    expect(result.provider.container!.mountClaudeConfigReadonly).toBe(true);
+  });
+
+  // 22.1: non-boolean value rejected
+  it('rejects mount_claude_config_readonly: "yes" (non-boolean)', () => {
+    expect(() =>
+      ScrowConfigSchema.parse({
+        provider: { container: { mount_claude_config_readonly: 'yes' } },
+      }),
+    ).toThrow();
+  });
+});
+
+describe('ScrowConfigSchema — wsl_mount_prefix', () => {
+  // 22.4 AC2: defaults to /mnt/ when not specified
+  it('defaults wsl_mount_prefix to /mnt/', () => {
+    const result = ScrowConfigSchema.parse({});
+    expect(result.wslMountPrefix).toBe('/mnt/');
+  });
+
+  // 22.4 AC2: custom prefix is accepted
+  it('parses wsl_mount_prefix: /media/ correctly', () => {
+    const result = ScrowConfigSchema.parse({ wsl_mount_prefix: '/media/' });
+    expect(result.wslMountPrefix).toBe('/media/');
+  });
+
+  // 22.4: prefix must end with /
+  it('rejects wsl_mount_prefix without trailing slash', () => {
+    expect(() => ScrowConfigSchema.parse({ wsl_mount_prefix: '/mnt' })).toThrow();
+  });
+
+  // 22.4: empty string is rejected
+  it('rejects wsl_mount_prefix: "" (empty string)', () => {
+    expect(() => ScrowConfigSchema.parse({ wsl_mount_prefix: '' })).toThrow();
+  });
+
+  // 22.4: whitespace-only is rejected (trim + min(1))
+  it('rejects wsl_mount_prefix: "   " (whitespace-only)', () => {
+    expect(() => ScrowConfigSchema.parse({ wsl_mount_prefix: '   ' })).toThrow();
+  });
+
+  // 22.4: single slash is rejected — would classify every absolute path as a WSL Windows path
+  it('rejects wsl_mount_prefix: "/" (single slash — would bypass all permission checks)', () => {
+    expect(() => ScrowConfigSchema.parse({ wsl_mount_prefix: '/' })).toThrow();
   });
 });
 

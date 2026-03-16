@@ -14,6 +14,7 @@ import {
   DAEMON_IDENTITY_ENV,
   DAEMON_IDENTITY_VALUE,
 } from './pid-manager.js';
+import { PidLock } from './pid-lock.js';
 import type { DaemonStatusInfo } from '../types/index.js';
 
 /** Time in milliseconds to wait for daemon process to exit before escalating to SIGKILL. */
@@ -71,7 +72,21 @@ export async function startDaemon(): Promise<{ pid: number; dataDir: string }> {
   const paths = getPaths();
   const dataDir = paths.data;
 
-  // Check if daemon is already running
+  // AC1/AC2: Check advisory lock before PID file check to eliminate TOCTOU race.
+  // The lock is a pre-flight check only — the daemon runner process acquires and holds
+  // its own lock for its lifetime. Here we just verify no other daemon holds the lock.
+  // Single readOwnerPid() + processExists() call avoids a TOCTOU window that would arise
+  // from separate isHeld() then readOwnerPid() calls (the lock could be released between them).
+  const preFlightLock = new PidLock(dataDir);
+  const ownerPid = await preFlightLock.readOwnerPid();
+  if (ownerPid !== null && processExists(ownerPid)) {
+    throw new ScrowError(
+      ErrorCode.DAEMON_ALREADY_RUNNING,
+      `Daemon is already running with PID ${ownerPid} (advisory lock held)`,
+    );
+  }
+
+  // Check if daemon is already running (PID file check — secondary to lock check)
   const { status, pid: existingPid } = await checkPidStatus(dataDir);
   if (status === 'alive' && existingPid !== null) {
     throw new ScrowError(

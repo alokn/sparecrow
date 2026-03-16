@@ -48,6 +48,7 @@ const makeConfig = (): ScrowConfig => ({
   },
   tasks: [],
   lastSummaryEnabled: false,
+  wslMountPrefix: '/mnt/',
 });
 
 describe('writeCycleStatus ENOSPC handling (AC2)', () => {

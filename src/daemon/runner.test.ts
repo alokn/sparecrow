@@ -63,6 +63,8 @@ interface MockOverrides {
   providersMock?: Record<string, unknown>;
   /** Full config mock object — when provided, replaces the entire ../config/index.js mock. */
   configMock?: Record<string, unknown>;
+  /** Override PidLock.acquire() return value (default: true — lock acquired). */
+  pidLockAcquireResult?: boolean;
 }
 
 /**
@@ -179,6 +181,23 @@ function setupRunDaemonMocks(dataDir: string, overrides: MockOverrides = {}): vo
     killOrphanDaemons: async () => {},
     DAEMON_STATUS_FILENAME: 'daemon-status.json',
     readPid: async () => null,
+  }));
+
+  // Mock PidLock to prevent real lock file creation in dataDir during tests.
+  // The pidLockAcquireResult override allows testing the lock-contention exit path.
+  const acquireResult = overrides.pidLockAcquireResult ?? true;
+  vi.doMock('./pid-lock.js', () => ({
+    PID_LOCK_FILENAME: 'daemon.pid.lock',
+    PidLock: class MockPidLock {
+      constructor(_dataDir: string) {}
+      async acquire(_pid: number): Promise<boolean> {
+        return acquireResult;
+      }
+      async release(): Promise<void> {}
+      async readOwnerPid(): Promise<number | null> {
+        return acquireResult ? null : 99999;
+      }
+    },
   }));
 
   if (overrides.configMock) {
@@ -3819,6 +3838,28 @@ describe('runner', () => {
       expect(capturedLastErrorDetail).toBeDefined();
       expect(typeof capturedLastErrorDetail!['code']).toBe('string');
       expect(typeof capturedLastErrorDetail!['message']).toBe('string');
+    });
+
+    it('calls process.exit(1) when PidLock.acquire() returns false (lock contention path)', async () => {
+      // Verifies the lock-contention early-exit path in runDaemon():
+      //   acquire() returns false → log error → process.exit(1).
+      // The PidLock mock (via pidLockAcquireResult: false) must be registered here so
+      // the mocked PidLock class is used when runner.js imports ./pid-lock.js.
+      vi.resetModules();
+
+      const exitCodes: number[] = [];
+
+      setupRunDaemonMocks(dataDir, { pidLockAcquireResult: false });
+
+      vi.spyOn(process, 'exit').mockImplementation(((code: number) => {
+        exitCodes.push(code);
+      }) as never);
+
+      const { runDaemon } = await import('./runner.js');
+      await runDaemon();
+
+      // Lock contention must cause process.exit(1) before any polling loop is started.
+      expect(exitCodes).toContain(1);
     });
   });
 

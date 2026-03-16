@@ -20,6 +20,7 @@ export const CONFIG_DEFAULTS: Partial<ScrowConfig> = {
     idleHours: [],
   },
   tasks: [],
+  wslMountPrefix: '/mnt/',
 };
 
 /**
@@ -44,4 +45,5 @@ export const CONFIG_FALLBACK: ScrowConfig = {
     idleHours: [],
   },
   tasks: [],
+  wslMountPrefix: '/mnt/',
 };

@@ -10,6 +10,7 @@ export const ContainerConfigSchema: z.ZodType<ContainerConfig> = z
     cpu_limit: z.number().min(0.1).max(128.0).default(1.0),
     network_mode: z.enum(['bridge', 'none', 'host']).default('bridge'),
     mount_claude_config: z.boolean().default(true),
+    mount_claude_config_readonly: z.boolean().default(true),
     claude_binary_path: z.string().trim().min(1).optional(),
     mount_claude_binary: z.boolean().optional(),
   })
@@ -20,6 +21,7 @@ export const ContainerConfigSchema: z.ZodType<ContainerConfig> = z
     cpuLimit: v.cpu_limit,
     networkMode: v.network_mode,
     mountClaudeConfig: v.mount_claude_config,
+    mountClaudeConfigReadonly: v.mount_claude_config_readonly,
     ...(v.claude_binary_path !== undefined ? { claudeBinaryPath: v.claude_binary_path } : {}),
     ...(v.mount_claude_binary !== undefined ? { mountClaudeBinary: v.mount_claude_binary } : {}),
   }));
@@ -118,6 +120,15 @@ export const ScrowConfigSchema = z
       idle_hours: [],
     }),
     tasks: z.array(CustomTaskSchema).default([]),
+    wsl_mount_prefix: z
+      .string()
+      .trim()
+      .min(1)
+      .refine((v) => v.endsWith('/'), { message: 'wsl_mount_prefix must end with /' })
+      .refine((v) => v.length >= 2, {
+        message: 'wsl_mount_prefix must be at least 2 characters (e.g. /mnt/)',
+      })
+      .default('/mnt/'),
   })
   .transform(
     (v): ScrowConfig => ({
@@ -149,6 +160,7 @@ export const ScrowConfigSchema = z
         prompt: t.prompt,
         targetPath: t.target_path,
       })),
+      wslMountPrefix: v.wsl_mount_prefix,
     }),
   );
 

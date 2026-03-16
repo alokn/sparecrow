@@ -52,6 +52,7 @@ export const EventName = {
   CONTAINER_BINARY_MOUNT_FAILED: 'container.binary-mount-failed',
   CONTAINER_MOUNT_DECISION: 'container.mount-decision',
   CONTAINER_ENV_STRIPPED: 'container.env-stripped',
+  CONTAINER_CREDENTIALS_RW_OVERRIDE: 'container.credentials-rw-override',
   DAEMON_CONFIG_RESTART_INITIATED: 'daemon.config-restart-initiated',
   DAEMON_CONFIG_RESTART_COMPLETED: 'daemon.config-restart-completed',
   DAEMON_CONFIG_RESTART_FAILED: 'daemon.config-restart-failed',

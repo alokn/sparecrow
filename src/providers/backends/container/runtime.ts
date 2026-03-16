@@ -60,11 +60,29 @@ export interface ContainerListEntry {
   names: string;
 }
 
+/** Result of an interactive container run (stdin piped, output captured directly). */
+export interface InteractiveRunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
 export interface ContainerRuntime {
   name: string;
   available(): Promise<boolean>;
   info(): Promise<RuntimeInfo>;
   run(options: ContainerRunOptions): Promise<ContainerHandle>;
+  /**
+   * Runs a container interactively: writes stdinData to the container's stdin,
+   * captures stdout/stderr directly, and returns the exit code.
+   * Uses `-i --rm` instead of `--detach` to support stdin piping.
+   * This prevents task prompts from appearing in /proc/PID/cmdline.
+   */
+  runInteractive(
+    options: ContainerRunOptions,
+    stdinData: string,
+    timeoutMs: number,
+  ): Promise<InteractiveRunResult>;
   wait(containerId: string, timeoutMs: number): Promise<ContainerExitResult>;
   logs(containerId: string): Promise<{ stdout: string; stderr: string }>;
   remove(containerId: string): Promise<void>;

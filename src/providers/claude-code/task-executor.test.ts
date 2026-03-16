@@ -430,7 +430,9 @@ describe('ClaudeCodeTaskExecutor — mock backend delegation', () => {
     const [command, args, options] = mockBackend.execute.mock.calls[0]!;
     expect(command).toBe(fakeClaudePath);
     expect(args).toContain('--print');
-    expect(args).toContain('analyze code');
+    // Story 22.2: prompt is passed via stdinData, NOT as a CLI argument
+    expect(args).not.toContain('analyze code');
+    expect(options.stdinData).toBe('analyze code');
     expect(options.cwd).toBe('/tmp/repo');
     expect(options.timeoutMs).toBe(5000);
   });
@@ -686,6 +688,42 @@ describe('ClaudeCodeTaskExecutor — mock backend delegation', () => {
 
     expect(result.status).toBe('failed_quota');
     expect(result.errorCode).toBe(ErrorCode.QUOTA_EXHAUSTED);
+  });
+
+  // ── Story 22.2: Stdin prompt delivery ──────────────────────────────────────
+
+  it('passes prompt via stdinData instead of CLI args (Story 22.2 — /proc/PID/cmdline security)', async () => {
+    const mockBackend = makeMockBackend();
+    const executor = new ClaudeCodeTaskExecutor(
+      makeConfig({ claudePath: fakeClaudePath }),
+      mockBackend,
+    );
+
+    await executor.execute(makeTask({ prompt: 'secret task prompt' }));
+
+    expect(mockBackend.execute).toHaveBeenCalledOnce();
+    const [, args, options] = mockBackend.execute.mock.calls[0]!;
+    // Prompt must NOT appear in CLI args (would be visible in /proc/PID/cmdline)
+    expect(args).not.toContain('secret task prompt');
+    // Prompt must be passed via stdinData
+    expect(options.stdinData).toBe('secret task prompt');
+    // --print flag must still be present (reads prompt from stdin)
+    expect(args).toContain('--print');
+  });
+
+  it('always sets stdinData in BackendExecutionOptions regardless of prompt content', async () => {
+    const mockBackend = makeMockBackend();
+    const executor = new ClaudeCodeTaskExecutor(
+      makeConfig({ claudePath: fakeClaudePath }),
+      mockBackend,
+    );
+
+    // Even empty prompts should use stdinData
+    await executor.execute(makeTask({ prompt: '' }));
+
+    expect(mockBackend.execute).toHaveBeenCalledOnce();
+    const [, , options] = mockBackend.execute.mock.calls[0]!;
+    expect(options.stdinData).toBe('');
   });
 
   it('logs task.executor.failed with oomKilled: true in data payload', async () => {

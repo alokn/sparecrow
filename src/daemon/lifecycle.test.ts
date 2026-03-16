@@ -82,6 +82,26 @@ function makeUtilsMock(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Default pid-lock mock — PidLock that always reports no lock held (not blocking). */
+function makePidLockMock(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    isHeld: async () => false,
+    readOwnerPid: async () => null,
+    acquire: async () => true,
+    release: async () => {},
+  };
+  const merged = { ...defaults, ...overrides };
+  return {
+    PidLock: class {
+      isHeld = merged.isHeld;
+      readOwnerPid = merged.readOwnerPid;
+      acquire = merged.acquire;
+      release = merged.release;
+    },
+    PID_LOCK_FILENAME: 'daemon.pid.lock',
+  };
+}
+
 /** Default node:child_process mock — provides spawn as a no-op. */
 function makeChildProcessMock(overrides: Record<string, unknown> = {}) {
   return {
@@ -175,9 +195,31 @@ describe('lifecycle', () => {
     it('throws DAEMON_ALREADY_RUNNING when daemon is alive', async () => {
       vi.resetModules();
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'alive', pid: 42 }),
+        }),
+      );
+      const { startDaemon } = await import('./lifecycle.js');
+      await expect(startDaemon()).rejects.toMatchObject({ code: 'DAEMON_ALREADY_RUNNING' });
+    });
+
+    it('throws DAEMON_ALREADY_RUNNING when advisory lock is held', async () => {
+      // Fix 2 (TOCTOU): startDaemon() now uses a single readOwnerPid() + processExists() call
+      // instead of two separate isHeld() then readOwnerPid() calls. The test therefore must:
+      // 1. Have readOwnerPid() return a non-null PID (42) — simulates a live lock file.
+      // 2. Have processExists() return true — simulates the owning process being alive.
+      vi.resetModules();
+      vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () =>
+        makePidLockMock({
+          readOwnerPid: async () => 42,
+        }),
+      );
+      vi.doMock('./pid-manager.js', () =>
+        makePidManagerMock({
+          processExists: () => true,
         }),
       );
       const { startDaemon } = await import('./lifecycle.js');
@@ -190,6 +232,7 @@ describe('lifecycle', () => {
       let removedPid = false;
       let spawnCalled = false;
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'stale', pid: 9999 }),
@@ -235,6 +278,7 @@ describe('lifecycle', () => {
       process.execArgv = [];
       let capturedArgs: string[] = [];
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'none', pid: null }),
@@ -269,6 +313,7 @@ describe('lifecycle', () => {
       process.execArgv = ['--import', 'tsx/esm'];
       let capturedArgs: string[] = [];
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'none', pid: null }),
@@ -300,6 +345,7 @@ describe('lifecycle', () => {
       vi.resetModules();
       vi.useFakeTimers();
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'none', pid: null }),
@@ -328,6 +374,7 @@ describe('lifecycle', () => {
       vi.useFakeTimers();
       let spawnOptions: Record<string, unknown> = {};
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'none', pid: null }),
@@ -397,6 +444,7 @@ describe('lifecycle', () => {
       let removedPid = false;
       const mockKill = vi.fn();
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       let callCount = 0;
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
@@ -557,6 +605,7 @@ describe('lifecycle', () => {
       vi.useFakeTimers();
       let startCalled = false;
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'none', pid: null }),
@@ -715,6 +764,7 @@ describe('lifecycle', () => {
       process.argv[1] = '/fake/dist/index.js';
       process.execArgv = [];
       vi.doMock('../platform/index.js', () => makePlatformMock(dataDir));
+      vi.doMock('./pid-lock.js', () => makePidLockMock());
       vi.doMock('./pid-manager.js', () =>
         makePidManagerMock({
           checkPidStatus: async () => ({ status: 'none', pid: null }),

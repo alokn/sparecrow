@@ -89,6 +89,9 @@ const DEFAULT_SECURITY_OPTS: readonly string[] = ['no-new-privileges'];
 /** Ephemeral /tmp with nosuid+noexec: prevents setuid binaries and direct execution of attacker-written files. */
 const DEFAULT_TMPFS_MOUNTS: readonly string[] = ['/tmp:nosuid,noexec'];
 
+/** Default for mount_claude_config_readonly — must match the Zod schema default in src/config/schema.ts. */
+const DEFAULT_MOUNT_CLAUDE_CONFIG_READONLY = true;
+
 /** Number of consecutive idle health checks before emitting a warning — matches spawnWithGuardrails threshold. */
 const IDLE_CHECK_THRESHOLD = 2;
 
@@ -285,6 +288,219 @@ export class ContainerExecutionBackend implements ExecutionBackend {
   }
 
   /**
+   * Executes a CLI command inside a container using interactive stdin piping.
+   * Uses `docker/podman run -i --rm` instead of `--detach` to support stdin passthrough.
+   * The container is automatically removed on exit (--rm).
+   * Handles abort signal, onChunk streaming, and health monitoring warnings.
+   * Used when BackendExecutionOptions.stdinData is provided (Story 22.2).
+   */
+  private async _executeInteractive(
+    runtime: ContainerRuntime,
+    runOptions: ContainerRunOptions,
+    options: BackendExecutionOptions,
+  ): Promise<BackendExecutionResult> {
+    const startTime = Date.now();
+
+    // Guard: stdinData must be present — caller ensures this before delegating here
+    if (options.stdinData === undefined) {
+      throw new ScrowError(
+        ErrorCode.TASK_EXECUTION_FAILED,
+        '_executeInteractive called without stdinData — this is a programming error.',
+      );
+    }
+    const stdinData = options.stdinData;
+
+    // Health monitoring is not supported for interactive (inline) containers:
+    // there is no detached container ID to poll stats against. Warn when configured
+    // so operators know why idle detection is inactive for stdin-pipe executions.
+    const healthCheckIntervalMs = options.healthCheckIntervalMs ?? DEFAULT_HEALTH_CHECK_INTERVAL_MS;
+    if (healthCheckIntervalMs > 0) {
+      void logger.warn(EventName.CONTAINER_HEALTH_STATS_FAILED, {
+        containerId: 'interactive',
+        error:
+          'Health monitoring is not supported for interactive stdin-pipe containers — skipped.',
+      });
+    }
+
+    // Pre-abort guard: if signal is already fired, bail immediately
+    if (options.signal?.aborted) {
+      return {
+        stdout: '',
+        stderr: '',
+        exitCode: null,
+        timedOut: false,
+        aborted: true,
+        oomKilled: false,
+      };
+    }
+
+    // Use a unique tag for log correlation so log-parsing tooling receives a
+    // consistent, descriptive identifier instead of the opaque constant 'interactive'.
+    const logTag = `interactive-${Date.now().toString(36)}`;
+
+    void logger.info(EventName.CONTAINER_TASK_STARTED, {
+      containerId: logTag,
+      image: this._image,
+      mountStrategy: this.mountStrategy,
+      cwd: options.cwd ?? process.cwd(),
+      stdinMode: true,
+    });
+
+    // Set up abort handling: use an AbortController that we reject when the
+    // caller's signal fires. The run itself is a single awaited promise so we
+    // race it against an abort rejection.
+    let aborted = false;
+    let abortReject: ((reason: unknown) => void) | null = null;
+    const abortPromise = new Promise<never>((_res, rej) => {
+      abortReject = rej;
+    });
+
+    const abortHandler = (): void => {
+      aborted = true;
+      abortReject?.(
+        new ScrowError(ErrorCode.TASK_EXECUTION_FAILED, 'Interactive container aborted by signal'),
+      );
+    };
+
+    if (options.signal) {
+      options.signal.addEventListener('abort', abortHandler);
+    }
+
+    try {
+      const result = await Promise.race([
+        runtime.runInteractive(runOptions, stdinData, options.timeoutMs),
+        abortPromise,
+      ]);
+
+      // If we reach here and aborted is true, the container exited before the
+      // signal race resolved — still report as aborted for consistency.
+      if (aborted) {
+        const durationMs = Date.now() - startTime;
+        void logger.info(EventName.CONTAINER_TASK_COMPLETED, {
+          containerId: logTag,
+          exitCode: null,
+          timedOut: false,
+          aborted: true,
+          oomKilled: false,
+          durationMs,
+          error: null,
+        });
+        return {
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          timedOut: false,
+          aborted: true,
+          oomKilled: false,
+        };
+      }
+
+      const durationMs = Date.now() - startTime;
+
+      void logger.info(EventName.CONTAINER_TASK_COMPLETED, {
+        containerId: logTag,
+        exitCode: result.exitCode,
+        timedOut: false,
+        aborted: false,
+        oomKilled: false,
+        durationMs,
+        error: null,
+      });
+
+      // Bound output
+      const maxBytes = result.exitCode === 0 ? MAX_OUTPUT_BYTES_SUCCESS : MAX_OUTPUT_BYTES;
+      const boundStdout = boundOutput(result.stdout, maxBytes);
+      const boundStderr = boundOutput(result.stderr, maxBytes);
+
+      // Forward collected output via onChunk so daemon partial-output writers receive data
+      if (options.onChunk) {
+        if (boundStdout) {
+          try {
+            options.onChunk(boundStdout, 'stdout');
+          } catch {
+            // Non-fatal: swallow errors from onChunk to protect the execution path
+          }
+        }
+        if (boundStderr) {
+          try {
+            options.onChunk(boundStderr, 'stderr');
+          } catch {
+            // Non-fatal: swallow errors from onChunk to protect the execution path
+          }
+        }
+      }
+
+      return {
+        stdout: boundStdout,
+        stderr: boundStderr,
+        exitCode: result.exitCode,
+        timedOut: false,
+        aborted: false,
+        oomKilled: false,
+      };
+    } catch (err: unknown) {
+      const durationMs = Date.now() - startTime;
+
+      // Abort path
+      if (aborted) {
+        void logger.info(EventName.CONTAINER_TASK_COMPLETED, {
+          containerId: logTag,
+          exitCode: null,
+          timedOut: false,
+          aborted: true,
+          oomKilled: false,
+          durationMs,
+          error: null,
+        });
+        return {
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          timedOut: false,
+          aborted: true,
+          oomKilled: false,
+        };
+      }
+
+      if (err instanceof ScrowError && err.code === ErrorCode.TASK_TIMEOUT) {
+        void logger.info(EventName.CONTAINER_TASK_COMPLETED, {
+          containerId: logTag,
+          exitCode: null,
+          timedOut: true,
+          aborted: false,
+          oomKilled: false,
+          durationMs,
+          error: null,
+        });
+
+        return {
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          timedOut: true,
+          aborted: false,
+          oomKilled: false,
+        };
+      }
+
+      void logger.info(EventName.CONTAINER_TASK_COMPLETED, {
+        containerId: logTag,
+        exitCode: null,
+        timedOut: false,
+        aborted: false,
+        oomKilled: false,
+        durationMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    } finally {
+      if (options.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+    }
+  }
+
+  /**
    * Execute a CLI command inside a rootless container.
    * Creates a container per execution, mounts the target repository,
    * captures output, and cleans up in all code paths.
@@ -349,6 +565,8 @@ export class ContainerExecutionBackend implements ExecutionBackend {
     // mismatching them causes "Not logged in" because Claude looks in $HOME/.claude/.
     const credentials = await resolveContainerCredentials({
       mountClaudeConfig: this._config?.mountClaudeConfig ?? true,
+      mountClaudeConfigReadonly:
+        this._config?.mountClaudeConfigReadonly ?? DEFAULT_MOUNT_CLAUDE_CONFIG_READONLY,
       containerHome: effectiveContainerHome,
     });
 
@@ -469,6 +687,13 @@ export class ContainerExecutionBackend implements ExecutionBackend {
         message:
           'No credentials found for container execution. Ensure ~/.claude/.credentials.json exists or provide ANTHROPIC_API_KEY.',
       });
+    }
+
+    // ── Interactive stdin path: when stdinData is provided, use runInteractive
+    //    to pipe data via stdin instead of CLI args (Story 22.2 — prevents prompt
+    //    exposure in /proc/PID/cmdline on shared servers). ──
+    if (options.stdinData !== undefined) {
+      return this._executeInteractive(runtime, runOptions, options);
     }
 
     // Create and start the container

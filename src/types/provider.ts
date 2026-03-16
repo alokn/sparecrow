@@ -84,6 +84,13 @@ export interface BackendExecutionOptions {
    * Errors thrown by this callback are swallowed at the spawn level to protect execution.
    */
   onChunk?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /**
+   * Optional data to write to the child process's stdin.
+   * When provided, the data is written to stdin and the stream is closed.
+   * Used for passing task prompts via stdin instead of CLI arguments
+   * to prevent exposure in /proc/PID/cmdline on shared servers.
+   */
+  stdinData?: string;
 }
 
 /** Result of a CLI command executed by an ExecutionBackend. */

@@ -8,6 +8,7 @@ import { ClaudeCodeAuthManager } from '../providers/claude-code/index.js';
 import { TriggerEngine } from '../trigger/index.js';
 import { QueueStore, QueueManager } from '../queue/index.js';
 import { writePid, removePid, killOrphanDaemons } from './pid-manager.js';
+import { PidLock } from './pid-lock.js';
 import {
   writeRunningStatus,
   writeRestartingStatus,
@@ -128,6 +129,22 @@ export async function runDaemon(): Promise<void> {
 
   void logger.debug('runner.starting', { pid });
 
+  // AC1: Acquire advisory lock before writing PID file.
+  // The lock is held for the daemon's lifetime. On crash, the OS closes the
+  // file handle and the stale lock is recovered on next startup (AC3).
+  const pidLock = new PidLock(dataDir);
+  const lockAcquired = await pidLock.acquire(pid);
+  if (!lockAcquired) {
+    const ownerPid = await pidLock.readOwnerPid();
+    void logger.error('runner.lock_contention', {
+      pid,
+      ownerPid,
+      reason: 'Another daemon instance holds the PID lock',
+    });
+    process.exit(1);
+    return;
+  }
+
   // Write PID file so the parent CLI can confirm startup
   await writePid(dataDir, pid);
 
@@ -205,7 +222,8 @@ export async function runDaemon(): Promise<void> {
 
   // Read subscription tier from credentials.
   // The same authManager instance is reused by createProvider to avoid duplicate instantiation.
-  const authManager = new ClaudeCodeAuthManager();
+  // Declared as `let` so onRestartRequired can replace it when wslMountPrefix changes in config.
+  let authManager = new ClaudeCodeAuthManager({ wslMountPrefix: config.wslMountPrefix });
   const subscriptionMeta = await authManager.readSubscriptionTier();
   void logger.debug('runner.subscription_tier_resolved', {
     rateLimitTier: subscriptionMeta.rateLimitTier,
@@ -245,6 +263,14 @@ export async function runDaemon(): Promise<void> {
       backendState: null,
     });
     await removePid(dataDir);
+    // Release advisory lock before exiting — prevents stale lock blocking next startup.
+    try {
+      await pidLock.release();
+    } catch (lockErr) {
+      void logger.error('runner.provider_init_lock_release_failed', {
+        error: lockErr instanceof Error ? lockErr.message : String(lockErr),
+      });
+    }
     process.exit(1);
     return;
   }
@@ -319,6 +345,15 @@ export async function runDaemon(): Promise<void> {
       // This mirrors the guard in reloadConfig() so that an unavailable container runtime
       // is caught here rather than surfacing a cryptic createProvider() failure (AC6 path).
       await validateProviderBackend(newConfig.provider.name, newConfig.provider);
+
+      // Propagate updated wslMountPrefix to authManager so that a live config change to
+      // wsl_mount_prefix is not silently ignored for the lifetime of the daemon process.
+      if (newConfig.wslMountPrefix !== currentConfig.wslMountPrefix) {
+        authManager = new ClaudeCodeAuthManager({ wslMountPrefix: newConfig.wslMountPrefix });
+        void logger.debug('runner.auth_manager_recreated', {
+          wslMountPrefix: newConfig.wslMountPrefix,
+        });
+      }
 
       const newProvider = await createProvider(newConfig.provider.name, newConfig.provider, {
         authManager,
@@ -557,6 +592,8 @@ export async function runDaemon(): Promise<void> {
     onReload: reloadConfig,
     onShutdownComplete: () => {
       cleanShutdownController.abort();
+      // Release PID advisory lock on clean shutdown — fire-and-forget since we're exiting.
+      void pidLock.release();
       process.removeListener('uncaughtException', uncaughtHandler);
       process.removeListener('unhandledRejection', unhandledRejectionHandler);
       unregisterSignalHandlers();
@@ -624,6 +661,15 @@ export async function runDaemon(): Promise<void> {
   } catch (pidErr) {
     void logger.error('runner.loop_exit_pid_remove_failed', {
       error: pidErr instanceof Error ? pidErr.message : String(pidErr),
+    });
+  }
+
+  // Release PID advisory lock on unexpected exit
+  try {
+    await pidLock.release();
+  } catch (lockErr) {
+    void logger.error('runner.loop_exit_lock_release_failed', {
+      error: lockErr instanceof Error ? lockErr.message : String(lockErr),
     });
   }
 

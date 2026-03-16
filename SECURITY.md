@@ -34,33 +34,29 @@ The following security measures are implemented in the current release:
 
 The following findings from security audits (2026-03-10, 2026-03-13) are architecturally complex or well-mitigated. They are documented here with their current mitigations and planned fix versions.
 
-### Read-write `~/.claude/` credential mount (HIGH)
+### ~~Read-write `~/.claude/` credential mount (HIGH)~~ — RESOLVED in v1.1
 
 - **Location**: `src/providers/backends/container/credential-resolver.ts`
 - **Description**: The `~/.claude/` directory is mounted read-write into the container, giving the container process write access to OAuth credentials
-- **Current mitigation**: Container runs with `CAP_DROP=ALL` and `no-new-privileges`, limiting what a compromised process can do with the credentials
-- **Planned fix**: Read-only mount in v1.1 (`readonly: true` on the credential mount)
+- **Resolution (v1.1, Story 22.1)**: The `~/.claude/` directory is now mounted read-only by default (`readonly: true`). This prevents a compromised container process from **modifying or tampering with** OAuth credentials (e.g. token rotation attacks, credential corruption). Note: a read-only mount does not prevent the container process from *reading* credential file contents — this is expected and required for Claude Code authentication. A `mount_claude_config_readonly` config option (default: `true`) allows users to override this with a `warn`-level security log. OAuth token refresh is handled on the host side by `auth-manager.ts` and the refreshed token is available on the next container task via the read-only mount.
 
-### Task prompt visible in `/proc/PID/cmdline` (MEDIUM)
+### ~~Task prompt visible in `/proc/PID/cmdline` (MEDIUM)~~ — RESOLVED in v1.1
 
 - **Location**: `src/providers/claude-code/task-executor.ts`
 - **Description**: Task prompts are passed as CLI arguments to the `claude` binary, making them visible in `/proc/PID/cmdline` to other users on shared servers
-- **Current mitigation**: This is only relevant on shared multi-user servers; most sparecrow users run on single-user workstations or CI machines
-- **Planned fix**: Pass prompts via stdin pipe in v1.1
+- **Resolution (v1.1, Story 22.2)**: Task prompts are now delivered to the `claude` binary via stdin pipe instead of CLI arguments. The `--print` flag is passed without a positional prompt argument, and the prompt text is written to the child process's stdin stream. For the container execution backend, `docker/podman run -i --rm` is used instead of `--detach` when stdin data is present, enabling stdin passthrough into the container. The `stdinData` field in `BackendExecutionOptions` carries the prompt through the execution pipeline without exposing it in `/proc/PID/cmdline`.
 
-### PID file TOCTOU race (MEDIUM)
+### ~~PID file TOCTOU race (MEDIUM)~~ — RESOLVED in v1.1
 
-- **Location**: `src/daemon/daemon-lifecycle.ts`
+- **Location**: `src/daemon/lifecycle.ts`
 - **Description**: The PID file check-then-use pattern has a time-of-check-to-time-of-use race condition between reading the PID file and sending a signal
-- **Current mitigation**: `killOrphanDaemons()` on startup detects and cleans up stale PIDs; the race window is very small in practice
-- **Planned fix**: File lock (e.g., `flock`) in v1.1
+- **Resolution (v1.1, Story 22.3)**: A `PidLock` utility (`src/daemon/pid-lock.ts`) now provides advisory file locking using atomic exclusive file creation (`O_EXCL`). The daemon runner acquires an exclusive lock on `daemon.pid.lock` at startup and holds the file handle open for its lifetime. On process crash, the OS closes the file handle and the stale lock file is detected via PID liveness check on next startup (automatic recovery). The `daemon start` command checks the advisory lock before the PID file check, eliminating the TOCTOU race window. Two concurrent `daemon start` invocations cannot both succeed — the second detects the lock and exits with `DAEMON_ALREADY_RUNNING`.
 
 ### WSL permission-check bypass heuristic (MEDIUM)
 
 - **Location**: `src/platform/detect.ts`
-- **Description**: On WSL (Windows Subsystem for Linux), filesystem permission checks are bypassed because WSL does not enforce POSIX permissions on Windows-hosted filesystems
-- **Current mitigation**: This heuristic only applies on WSL, where POSIX permissions are not meaningful
-- **Planned fix**: Narrow the bypass to only Windows-hosted mount points in v1.1
+- **Description**: On WSL (Windows Subsystem for Linux), filesystem permission checks were bypassed for all paths because WSL does not enforce POSIX permissions on Windows-hosted filesystems
+- **Resolution (v1.1, Story 22.4)**: The `isWslWindowsPath()` function in `src/platform/detect.ts` now narrows the permission-check bypass to only Windows-hosted mount points (default: `/mnt/`). POSIX-native filesystems within WSL (e.g., `/home/`, `/tmp/`, `/var/`) now receive proper permission enforcement. The mount prefix is configurable via `wsl_mount_prefix` in `config.yaml` for non-standard WSL mount configurations. Non-WSL platforms are unaffected.
 
 ### `execOrThrow` args in error messages (LOW)
 

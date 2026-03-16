@@ -96,8 +96,10 @@ export class ClaudeCodeTaskExecutor implements TaskExecutor {
       );
     }
 
-    // AC1/AC3: Build args — prompt as positional arg, permission flag gated by config
-    const args: string[] = ['--print', task.prompt];
+    // AC1/AC3: Build args — prompt delivered via stdin (Story 22.2) to prevent
+    // exposure in /proc/PID/cmdline on shared servers. The `--print` flag without
+    // a positional argument causes Claude CLI to read the prompt from stdin.
+    const args: string[] = ['--print'];
     if (this._config.allowDangerouslySkipPermissions) {
       args.push('--dangerously-skip-permissions');
     }
@@ -125,10 +127,12 @@ export class ClaudeCodeTaskExecutor implements TaskExecutor {
       );
     }
 
-    // AC4/AC5: Delegate CLI invocation to the injected ExecutionBackend
+    // AC4/AC5: Delegate CLI invocation to the injected ExecutionBackend.
+    // Prompt is delivered via stdinData to prevent /proc/PID/cmdline exposure (Story 22.2).
     const backendOptions: BackendExecutionOptions = {
       cwd: task.targetPath,
       timeoutMs,
+      stdinData: task.prompt,
       ...(options?.signal !== undefined ? { signal: options.signal } : {}),
       ...(options?.healthCheckIntervalMs !== undefined
         ? { healthCheckIntervalMs: options.healthCheckIntervalMs }
