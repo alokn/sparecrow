@@ -125,6 +125,7 @@ describe('full install round-trip smoke regression (suite 11)', () => {
       '\r', // decline dangerous permissions (default: false)
       `${join(homeDir, 'repo')}\r`, // type repo path and confirm in one atomic keystroke
       '\r', // confirm summary
+      '\r', // decline telemetry (default: no)
       '\r', // decline shell completions (default: no)
     ];
 

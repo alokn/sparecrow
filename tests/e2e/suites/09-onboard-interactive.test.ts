@@ -186,6 +186,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline telemetry (default: no)
         '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
@@ -236,6 +237,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline telemetry (default: no)
         '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
@@ -297,6 +299,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline telemetry (default: no)
         '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
@@ -350,6 +353,7 @@ describe('onboard interactive (suite 09)', () => {
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
         '\r', // confirm summary
+        '\r', // decline telemetry (default: no)
         '\r', // decline shell completions (default: no)
       ],
       keystrokeDelayMs: 150,
@@ -460,7 +464,8 @@ describe('onboard interactive (suite 09)', () => {
         '\r', // decline permissions (default false)
         join(homeDir, 'repo'), // type repo path
         '\r', // submit repo path
-        '\r', // confirm summary (triggers apply → write fails)
+        '\r', // confirm summary
+        '\r', // decline telemetry (default: no) — triggers apply → write fails
       ],
       keystrokeDelayMs: 150,
       timeoutMs: 30000,

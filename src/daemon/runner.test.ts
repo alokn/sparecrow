@@ -222,6 +222,11 @@ function setupRunDaemonMocks(dataDir: string, overrides: MockOverrides = {}): vo
     vi.doMock('../config/index.js', () => configMock);
   }
 
+  // Mock telemetry to prevent real filesystem/network I/O during tests.
+  vi.doMock('../telemetry/index.js', () => ({
+    recordTelemetryEvent: async () => false,
+  }));
+
   // defaultSnapshot matches the CapacitySnapshot interface (provider.ts UsageMonitor.poll() contract).
   // The PollingLoop is mocked separately so this snapshot is not exercised by the real poll() path,
   // but the shape must be correct so TypeScript and any future test evolution stays aligned.
