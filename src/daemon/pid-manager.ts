@@ -73,6 +73,33 @@ export function processExists(pid: number): boolean {
   }
 }
 
+/**
+ * Attempts to read the process name (comm) for the given PID.
+ * Returns the process name or null if unreadable.
+ */
+export async function getProcessName(pid: number): Promise<string | null> {
+  if (isLinux()) {
+    try {
+      const comm = await readFile(`/proc/${pid}/comm`, 'utf-8');
+      return comm.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (isMacOS()) {
+    try {
+      // Use -o args= (not comm=) to get full command path; comm= truncates at 16 chars on macOS.
+      const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'args=']);
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 /** Validates that the process at the given PID is a sparecrow daemon process.
  *  Uses cmdline inspection (/proc/<pid>/cmdline on Linux, ps on macOS) to check
  *  for the daemon entry marker. Falls back to environment variable check if cmdline read fails.

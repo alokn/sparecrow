@@ -13,6 +13,7 @@ import {
   DAEMON_STATUS_FILENAME,
   DAEMON_IDENTITY_ENV,
   DAEMON_IDENTITY_VALUE,
+  getProcessName,
 } from './pid-manager.js';
 import { PidLock } from './pid-lock.js';
 import type { DaemonStatusInfo } from '../types/index.js';
@@ -65,6 +66,21 @@ export function sanitizeDaemonEnv(): NodeJS.ProcessEnv {
   return sanitized;
 }
 
+/**
+ * Builds a DAEMON_ALREADY_RUNNING ScrowError enriched with the process name for a given PID.
+ * Consolidates the identical error-construction logic used in both the advisory-lock path
+ * and the PID-file path of startDaemon(), ensuring the two paths stay in sync.
+ */
+async function buildAlreadyRunningError(pid: number): Promise<ScrowError> {
+  const procName = await getProcessName(pid);
+  const procInfo = procName ? ` (${procName})` : '';
+  return new ScrowError(
+    ErrorCode.DAEMON_ALREADY_RUNNING,
+    `Daemon is already running with PID ${pid}${procInfo}. ` +
+      `Run \`sparecrow daemon stop\` to stop it first.`,
+  );
+}
+
 /** Spawns the daemon process in detached mode.
  *  Returns the child PID immediately; daemon manages its own PID file. */
 export async function startDaemon(): Promise<{ pid: number; dataDir: string }> {
@@ -80,19 +96,13 @@ export async function startDaemon(): Promise<{ pid: number; dataDir: string }> {
   const preFlightLock = new PidLock(dataDir);
   const ownerPid = await preFlightLock.readOwnerPid();
   if (ownerPid !== null && processExists(ownerPid)) {
-    throw new ScrowError(
-      ErrorCode.DAEMON_ALREADY_RUNNING,
-      `Daemon is already running with PID ${ownerPid} (advisory lock held)`,
-    );
+    throw await buildAlreadyRunningError(ownerPid);
   }
 
   // Check if daemon is already running (PID file check — secondary to lock check)
   const { status, pid: existingPid } = await checkPidStatus(dataDir);
   if (status === 'alive' && existingPid !== null) {
-    throw new ScrowError(
-      ErrorCode.DAEMON_ALREADY_RUNNING,
-      `Daemon is already running with PID ${existingPid}`,
-    );
+    throw await buildAlreadyRunningError(existingPid);
   }
 
   // Clean up stale PID file if present

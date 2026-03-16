@@ -22,3 +22,8 @@ export type { SpawnGuardrailOptions, SpawnGuardrailResult } from './process.js';
 
 export { validateRepository } from './repo-validation.js';
 export type { RepoValidationResult } from './repo-validation.js';
+
+// sanitizeArgs: use directly only when truncation is not needed; prefer formatArgsForError for error messages.
+export { sanitizeArgs, formatArgsForError } from './exec.js';
+
+export { levenshteinDistance, findClosestMatch } from './fuzzy-match.js';

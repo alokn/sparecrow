@@ -72,48 +72,56 @@ describe('QueueStore', () => {
       expect(result.tasks[0]!.createdAt.toISOString()).toBe('2026-02-15T12:00:00.000Z');
     });
 
-    it('returns empty tasks and creates timestamped backup on corrupt JSON', async () => {
+    it('throws QUEUE_CORRUPT and creates timestamped backup on corrupt JSON', async () => {
       const filePath = join(dataDir, 'queue.json');
       await writeFile(filePath, 'not-valid-json', 'utf-8');
 
       const store = new QueueStore(dataDir);
-      const result = await store.read();
+      await expect(store.read()).rejects.toMatchObject({ code: 'QUEUE_CORRUPT' });
 
-      expect(result).toEqual({ tasks: [], paused: false });
       const files = await readdir(dataDir);
-      const backupFile = files.find((f) => f.startsWith('queue.json.backup-'));
+      const backupFile = files.find((f) => f.startsWith('queue.json.corrupt.'));
       expect(backupFile).toBeDefined();
       const backup = await readFile(join(dataDir, backupFile!), 'utf-8');
       expect(backup).toBe('not-valid-json');
     });
 
-    it('returns empty tasks and creates timestamped backup when schema validation fails', async () => {
+    it('throws QUEUE_CORRUPT with actionable recovery message on corrupt JSON', async () => {
+      const filePath = join(dataDir, 'queue.json');
+      await writeFile(filePath, 'not-valid-json', 'utf-8');
+
+      const store = new QueueStore(dataDir);
+      await expect(store.read()).rejects.toMatchObject({
+        code: 'QUEUE_CORRUPT',
+        message: expect.stringContaining('sparecrow queue clear --yes'),
+      });
+    });
+
+    it('throws QUEUE_CORRUPT and creates timestamped backup when schema validation fails', async () => {
       const filePath = join(dataDir, 'queue.json');
       // Valid JSON but wrong schema (missing required fields)
       await writeFile(filePath, JSON.stringify({ version: 1, tasks: [{ bad: 'data' }] }), 'utf-8');
 
       const store = new QueueStore(dataDir);
-      const result = await store.read();
+      await expect(store.read()).rejects.toMatchObject({ code: 'QUEUE_CORRUPT' });
 
-      expect(result).toEqual({ tasks: [], paused: false });
       const files = await readdir(dataDir);
-      const backupFile = files.find((f) => f.startsWith('queue.json.backup-'));
+      const backupFile = files.find((f) => f.startsWith('queue.json.corrupt.'));
       expect(backupFile).toBeDefined();
       const backup = await readFile(join(dataDir, backupFile!), 'utf-8');
       expect(backup).toContain('"bad"');
     });
 
-    it('returns empty tasks on unknown version in queue file (schema mismatch)', async () => {
+    it('throws QUEUE_CORRUPT on unknown version in queue file (schema mismatch)', async () => {
       const filePath = join(dataDir, 'queue.json');
       await writeFile(filePath, JSON.stringify({ version: 99, tasks: [] }), 'utf-8');
 
       const store = new QueueStore(dataDir);
-      const result = await store.read();
-      // version: 99 fails z.literal(1) → treated as corrupt
-      expect(result).toEqual({ tasks: [], paused: false });
+      // version: 99 fails z.literal(1) → treated as corrupt → now throws
+      await expect(store.read()).rejects.toMatchObject({ code: 'QUEUE_CORRUPT' });
     });
 
-    it('rejects non-ISO createdAt as schema validation failure', async () => {
+    it('throws QUEUE_CORRUPT on non-ISO createdAt (schema validation failure)', async () => {
       const filePath = join(dataDir, 'queue.json');
       const payload = {
         version: 1,
@@ -134,11 +142,10 @@ describe('QueueStore', () => {
       await writeFile(filePath, JSON.stringify(payload), 'utf-8');
 
       const store = new QueueStore(dataDir);
-      const result = await store.read();
-      expect(result).toEqual({ tasks: [], paused: false });
+      await expect(store.read()).rejects.toMatchObject({ code: 'QUEUE_CORRUPT' });
     });
 
-    it('rejects template task without templateName via discriminated union', async () => {
+    it('throws QUEUE_CORRUPT on template task without templateName (discriminated union)', async () => {
       const filePath = join(dataDir, 'queue.json');
       const payload = {
         version: 1,
@@ -158,9 +165,8 @@ describe('QueueStore', () => {
       await writeFile(filePath, JSON.stringify(payload), 'utf-8');
 
       const store = new QueueStore(dataDir);
-      const result = await store.read();
-      // Missing templateName on template type → corrupt
-      expect(result).toEqual({ tasks: [], paused: false });
+      // Missing templateName on template type → corrupt → now throws
+      await expect(store.read()).rejects.toMatchObject({ code: 'QUEUE_CORRUPT' });
     });
 
     it('defaults legacy records without status to pending on read', async () => {
@@ -196,16 +202,16 @@ describe('QueueStore', () => {
 
       await writeFile(filePath, 'corrupt-1', 'utf-8');
       const store = new QueueStore(dataDir);
-      await store.read();
+      await store.read().catch(() => {});
 
       // Small delay to ensure different timestamp
       await new Promise((r) => setTimeout(r, 10));
 
       await writeFile(filePath, 'corrupt-2', 'utf-8');
-      await store.read();
+      await store.read().catch(() => {});
 
       const files = await readdir(dataDir);
-      const backups = files.filter((f) => f.startsWith('queue.json.backup-'));
+      const backups = files.filter((f) => f.startsWith('queue.json.corrupt.'));
       expect(backups.length).toBeGreaterThanOrEqual(2);
     });
 
@@ -504,7 +510,7 @@ describe('QueueStore — backup failure path (mocked fs)', () => {
     vi.resetModules();
   });
 
-  it('continues and returns empty tasks when backup write fails during corruption recovery', async () => {
+  it('throws QUEUE_CORRUPT with actionable message even when backup write fails during corruption recovery', async () => {
     vi.resetModules();
 
     const corruptContent = 'not-valid-json';
@@ -518,10 +524,12 @@ describe('QueueStore — backup failure path (mocked fs)', () => {
 
     const { QueueStore: MockedQueueStore } = await import('./queue-store.js');
     const store = new MockedQueueStore('/any/dir');
-    const result = await store.read();
 
-    // Does not throw — returns empty gracefully despite backup write failure
-    expect(result).toEqual({ tasks: [], paused: false });
+    // Now throws QUEUE_CORRUPT — backup failure is logged but error is still surfaced
+    await expect(store.read()).rejects.toMatchObject({
+      code: 'QUEUE_CORRUPT',
+      message: expect.stringContaining('sparecrow queue clear --yes'),
+    });
   });
 
   describe('DEFAULT_TIMEOUT_MS', () => {

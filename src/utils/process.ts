@@ -118,6 +118,12 @@ export interface SpawnGuardrailOptions {
    * Used by the daemon's partial output writer for live task output streaming (AC1).
    */
   onChunk?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /**
+   * Optional data to write to the child process's stdin before closing the stream.
+   * Used for passing task prompts via stdin instead of CLI arguments to avoid ARG_MAX
+   * limits and prevent prompt content appearing in /proc/PID/cmdline (Story 22.2).
+   */
+  stdinData?: string;
 }
 
 export interface SpawnGuardrailResult {
@@ -442,6 +448,19 @@ export async function spawnWithGuardrails(
       if (options.signal && externalAbortListener) {
         options.signal.removeEventListener('abort', externalAbortListener);
       }
+    }
+
+    // Write stdin data and close the stream when provided.
+    // Pass an error callback so EPIPE errors (child exits immediately after spawn)
+    // don't crash the process — the close/error event will still fire and settle.
+    if (options.stdinData !== undefined && child.stdin) {
+      child.stdin.write(options.stdinData, 'utf-8', (writeErr) => {
+        if (writeErr && !settled) {
+          // Stdin write failed — close will still fire; resolve with whatever we have.
+          settle(exitCode);
+        }
+      });
+      child.stdin.end();
     }
 
     child.stdout.on('data', (chunk: Buffer) => {

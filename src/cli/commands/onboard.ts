@@ -39,6 +39,12 @@ import {
   renderFirstDispatchMessage,
 } from './onboard-repository-daemon.js';
 import { runContainerDetectionStage } from './onboard-container.js';
+import {
+  detectShell,
+  installCompletions,
+  getRcFilePath,
+  buildFishCompletion,
+} from './shell-completions.js';
 
 export function registerOnboard(program: Command): void {
   program
@@ -68,12 +74,12 @@ export function registerOnboard(program: Command): void {
         return;
       }
 
-      await runOnboardingWizard(opts.installDaemon === true);
+      await runOnboardingWizard(opts.installDaemon === true, program);
     });
 }
 
 /** Runs the full onboarding wizard. Exits with code 1 on any failure. */
-async function runOnboardingWizard(installDaemonFlag: boolean): Promise<void> {
+async function runOnboardingWizard(installDaemonFlag: boolean, program: Command): Promise<void> {
   intro('Welcome to sparecrow setup');
 
   // ── Existing config detection (AC8) ──────────────────────────────
@@ -301,7 +307,10 @@ async function runOnboardingWizard(installDaemonFlag: boolean): Promise<void> {
       );
     }
 
-    // Step 3: Install + start daemon (if requested)
+    // Step 3: Offer shell completions install
+    await offerShellCompletions(program);
+
+    // Step 4: Install + start daemon (if requested)
     if (wantInstallDaemon) {
       const installSpinner = spinner();
       installSpinner.start('Installing daemon service...');
@@ -386,6 +395,52 @@ async function runOnboardingWizard(installDaemonFlag: boolean): Promise<void> {
 
     outro('Setup could not complete.');
     process.exit(1);
+  }
+}
+
+/**
+ * Offers to install shell completions during onboarding.
+ * Non-blocking: errors are logged but do not abort onboarding.
+ */
+async function offerShellCompletions(program: import('commander').Command): Promise<void> {
+  const shell = detectShell();
+  if (shell === 'unknown') {
+    return; // Cannot detect shell — skip silently
+  }
+
+  const rcPath = getRcFilePath(shell);
+  const shouldInstall = await confirm({
+    message: `Install shell completions for ${shell}?`,
+  });
+
+  if (isCancel(shouldInstall) || !shouldInstall) {
+    // Show manual install hint
+    process.stdout.write(
+      `\n  Tip: Install completions later with: sparecrow completions ${shell} --install\n`,
+    );
+    return;
+  }
+
+  try {
+    const commands = program.commands
+      .filter((c) => c.name() !== 'completions')
+      .map((c) => ({ name: c.name(), description: c.description() }));
+    const fishScript = shell === 'fish' ? buildFishCompletion(commands) : undefined;
+    const result = await installCompletions(shell, fishScript);
+    if (result.alreadyInstalled) {
+      const locationLabel = shell === 'fish' ? 'completions file' : 'rc file';
+      process.stdout.write(
+        `\n  Shell completions already installed in ${locationLabel} ${rcPath}\n`,
+      );
+    } else if (result.installed) {
+      process.stdout.write(`\n  Shell completions installed for ${shell} in ${rcPath}\n`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void logger.warn('onboard.completions.install_failed', { shell, error: msg });
+    process.stdout.write(
+      `\n  Could not install completions. Run manually: sparecrow completions ${shell} --install\n`,
+    );
   }
 }
 

@@ -61,6 +61,10 @@ export const EventName = {
   RESULT_ARTIFACT_WRITTEN: 'result.artifact-written',
   ACTION_EXECUTED: 'action.executed',
   ACTION_FAILED: 'action.failed',
+  QUEUE_CORRUPT: 'queue.corrupt',
+  QUEUE_CORRUPT_BACKUP_CREATED: 'queue.corrupt-backup-created',
+  QUEUE_CORRUPT_BACKUP_FAILED: 'queue.corrupt-backup-failed',
+  QUEUE_CORRUPT_RECOVERY: 'queue.corrupt-recovery',
 } as const;
 
 export type EventNameValue = (typeof EventName)[keyof typeof EventName];

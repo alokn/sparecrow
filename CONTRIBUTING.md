@@ -98,6 +98,10 @@ Open a GitHub issue with:
 - Steps to reproduce
 - Expected vs actual behaviour
 
+## Code of Conduct
+
+This project follows the [Contributor Covenant v2.1](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior as described in the Code of Conduct.
+
 ## Questions
 
 Open a GitHub Discussion or issue — happy to help.

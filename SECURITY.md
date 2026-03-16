@@ -60,10 +60,9 @@ The following findings from security audits (2026-03-10, 2026-03-13) are archite
 
 ### `execOrThrow` args in error messages (LOW)
 
-- **Location**: `src/utils/exec.ts`
-- **Description**: When `execOrThrow` fails, the error message includes the full command arguments, which could potentially contain sensitive information
-- **Current mitigation**: No secrets are passed as command arguments in the current codebase; all sensitive data flows through environment variables or mounted files
-- **Planned fix**: Sanitize arguments in error messages in v1.1
+- **Location**: `src/providers/backends/container/abstract-runtime.ts`, `src/utils/exec.ts`
+- **Description**: When `execOrThrow` fails, the error message includes command arguments which could potentially contain sensitive information
+- **Resolution (v1.1, Story 22.5)**: `formatArgsForError()` in `src/utils/exec.ts` sanitizes arguments before inclusion in error messages. Sensitive flags (`--token`, `--password`, `--secret`, `--auth`, `--credential`, `--api-key`, `--apikey`) have their values replaced with `[REDACTED]`. Arguments containing `Bearer` are fully redacted. Arguments exceeding 200 characters are truncated with `...[truncated]`. `abstract-runtime.ts` was updated to call `formatArgsForError` in both the non-zero exit and timeout error paths within `execOrThrow`.
 
 ### `safeReadJson` unchecked type assertion (LOW)
 

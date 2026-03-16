@@ -1,16 +1,18 @@
 /** Unit tests for atomic file write and safe JSON read helpers. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdir, readFile, rm, writeFile, chmod } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 import { atomicWrite, safeReadJson, AUDIT_LOG_FILENAME_REGEX } from './fs.js';
+import { ErrorCode } from '../errors/index.js';
 
 describe('atomicWrite()', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = join(tmpdir(), `sparecrow-fs-test-${Date.now()}`);
+    tmpDir = join(tmpdir(), `sparecrow-fs-test-${randomBytes(6).toString('hex')}`);
     await mkdir(tmpDir, { recursive: true });
   });
 
@@ -63,7 +65,7 @@ describe('safeReadJson()', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = join(tmpdir(), `sparecrow-json-test-${Date.now()}`);
+    tmpDir = join(tmpdir(), `sparecrow-json-test-${randomBytes(6).toString('hex')}`);
     await mkdir(tmpDir, { recursive: true });
   });
 
@@ -103,6 +105,77 @@ describe('safeReadJson()', () => {
     await writeFile(file, JSON.stringify(data));
     const result = await safeReadJson<typeof data>(file);
     expect(result).toEqual(data);
+  });
+
+  it('returns unknown without schema (backward compatibility)', async () => {
+    const file = join(tmpDir, 'compat.json');
+    await writeFile(file, JSON.stringify({ status: 'idle', pid: 42 }));
+    // Call without schema — must return the value as-is (unknown)
+    const result = await safeReadJson(file);
+    expect(result).toEqual({ status: 'idle', pid: 42 });
+  });
+});
+
+describe('safeReadJson() with Zod schema', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = join(tmpdir(), `sparecrow-schema-test-${randomBytes(6).toString('hex')}`);
+    await mkdir(tmpDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns validated data when schema matches', async () => {
+    const TestSchema = z.object({ name: z.string(), age: z.number() });
+    const file = join(tmpDir, 'valid.json');
+    await writeFile(file, JSON.stringify({ name: 'Alice', age: 30 }));
+    const result = await safeReadJson(file, TestSchema);
+    expect(result).toEqual({ name: 'Alice', age: 30 });
+  });
+
+  it('throws ScrowError with DATA_INVALID when schema validation fails', async () => {
+    const TestSchema = z.object({ name: z.string(), age: z.number() });
+    const file = join(tmpDir, 'invalid.json');
+    await writeFile(file, JSON.stringify({ name: 123, age: 'not a number' }));
+    await expect(safeReadJson(file, TestSchema)).rejects.toMatchObject({
+      code: ErrorCode.DATA_INVALID,
+    });
+  });
+
+  it('includes field path in error message on validation failure', async () => {
+    const TestSchema = z.object({ name: z.string(), age: z.number() });
+    const file = join(tmpDir, 'bad-field.json');
+    await writeFile(file, JSON.stringify({ name: 'Alice', age: 'old' }));
+    await expect(safeReadJson(file, TestSchema)).rejects.toMatchObject({
+      code: ErrorCode.DATA_INVALID,
+      message: expect.stringContaining('age'),
+    });
+  });
+
+  it('returns null for missing file even when schema is provided', async () => {
+    const TestSchema = z.object({ name: z.string(), age: z.number() });
+    const result = await safeReadJson(join(tmpDir, 'missing.json'), TestSchema);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for corrupt JSON even when schema is provided', async () => {
+    const TestSchema = z.object({ name: z.string(), age: z.number() });
+    const file = join(tmpDir, 'corrupt.json');
+    await writeFile(file, 'not json {{');
+    const result = await safeReadJson(file, TestSchema);
+    expect(result).toBeNull();
+  });
+
+  it('strips extra fields via Zod default strip behavior', async () => {
+    const StrictSchema = z.object({ id: z.number() });
+    const file = join(tmpDir, 'extra.json');
+    await writeFile(file, JSON.stringify({ id: 1, extra: 'field' }));
+    const result = await safeReadJson(file, StrictSchema);
+    expect(result).toEqual({ id: 1 });
+    expect(result).not.toHaveProperty('extra');
   });
 });
 

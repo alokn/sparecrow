@@ -149,6 +149,8 @@ export async function run(): Promise<void> {
   const { registerTask } = await import('./commands/task.js');
   const { registerWhy } = await import('./commands/why.js');
   const { registerRefresh } = await import('./commands/refresh.js');
+  const { registerQuickstart } = await import('./commands/quickstart.js');
+  const { registerExamples } = await import('./commands/examples.js');
 
   registerStatus(program);
   registerQueue(program);
@@ -165,6 +167,8 @@ export async function run(): Promise<void> {
   registerTask(program);
   registerWhy(program);
   registerRefresh(program);
+  registerQuickstart(program);
+  registerExamples(program);
 
   // Unknown command handler with fuzzy matching
   program.on('command:*', (operands: string[]) => {

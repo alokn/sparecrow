@@ -33,8 +33,9 @@ const ERROR_MESSAGES: Record<ErrorCodeValue, ErrorUserMessage> = {
     suggestion: 'Run: sparecrow queue add --template improve-code --target <path>',
   },
   [ErrorCode.QUEUE_CORRUPT]: {
-    userMessage: 'Task queue file is corrupt. A backup has been saved.',
-    suggestion: 'Run: sparecrow doctor to inspect queue state',
+    userMessage: 'Task queue file is corrupt. The corrupt file has been renamed for inspection.',
+    suggestion:
+      'Run `sparecrow queue clear --yes` to reset, or inspect the backup file saved alongside queue.json',
   },
   [ErrorCode.QUEUE_WRITE_FAILED]: {
     userMessage: 'Failed to write task queue file.',
@@ -58,7 +59,7 @@ const ERROR_MESSAGES: Record<ErrorCodeValue, ErrorUserMessage> = {
   },
   [ErrorCode.DAEMON_ALREADY_RUNNING]: {
     userMessage: 'Daemon is already running.',
-    suggestion: 'Run: sparecrow daemon status to check, or sparecrow daemon restart',
+    suggestion: 'Run: sparecrow daemon stop to stop it, or sparecrow daemon restart',
   },
   [ErrorCode.DAEMON_NOT_RUNNING]: {
     userMessage: 'Daemon is not running.',
@@ -281,6 +282,30 @@ const ERROR_MESSAGES: Record<ErrorCodeValue, ErrorUserMessage> = {
     userMessage: 'Invalid task status transition.',
     suggestion:
       'Valid lifecycle: pending -> in-progress -> done/failed/failed_quota; pending -> skipped; failed_quota -> in-progress/pending. Terminal states (done, failed, skipped) have no outgoing transitions.',
+  },
+  [ErrorCode.DATA_INVALID]: {
+    userMessage: 'Runtime state data file contains invalid values.',
+    suggestion: 'Run: sparecrow doctor to inspect and repair state files',
+  },
+  [ErrorCode.NOT_GIT_REPO]: {
+    userMessage: 'Current directory is not a git repository.',
+    suggestion:
+      'Run sparecrow quickstart from inside a git repo, or specify a path: sparecrow quickstart /path/to/repo',
+  },
+  [ErrorCode.QUICKSTART_EXECUTION_FAILED]: {
+    userMessage: 'Quickstart task execution failed.',
+    suggestion:
+      'Check the error output above. Ensure Claude Code is authenticated: claude auth login',
+  },
+  [ErrorCode.STATE_DIR_PERMISSION_DENIED]: {
+    userMessage: 'Permission denied when creating or writing to the state directory.',
+    suggestion:
+      'Fix ownership with: sudo chown -R $(whoami) <path>, or check that the parent directory is writable',
+  },
+  [ErrorCode.COMPLETIONS_INSTALL_FAILED]: {
+    userMessage: 'Failed to install shell completions.',
+    suggestion:
+      'Check file permissions on your shell rc file. Run: sparecrow completions <shell> to print the script manually.',
   },
 };
 

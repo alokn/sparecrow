@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { TemplateSchema } from './schema.js';
 import { ScrowError, ErrorCode } from '../errors/index.js';
-import { logger } from '../utils/index.js';
+import { logger, findClosestMatch } from '../utils/index.js';
 import type { ActionType } from '../types/index.js';
 
 /** Canonical built-in template keys in stable listing order (AC10, updated in Story 13.3). */
@@ -181,11 +181,10 @@ export function resolveTemplate(key: string, available: Template[]): Template {
   const { resolved } = resolveAlias(key);
   const template = available.find((t) => t.name === resolved);
   if (!template) {
-    const validKeys = available.map((t) => t.name).join(', ');
-    throw new ScrowError(
-      ErrorCode.TEMPLATE_NOT_FOUND,
-      `Unknown template '${key}'. Available templates: ${validKeys}`,
-    );
+    const names = available.map((t) => t.name);
+    const closest = findClosestMatch(key, names);
+    const hint = closest ? `Did you mean: ${closest}?` : `Available templates: ${names.join(', ')}`;
+    throw new ScrowError(ErrorCode.TEMPLATE_NOT_FOUND, `Template '${key}' not found. ${hint}`);
   }
   return template;
 }
@@ -224,9 +223,8 @@ export function resolveTemplateOrCustom(
     };
   }
 
-  const allNames = [...builtins.map((t) => t.name), ...customTasks.map((t) => t.name)].join(', ');
-  throw new ScrowError(
-    ErrorCode.TEMPLATE_NOT_FOUND,
-    `Unknown template '${name}'. Run 'sparecrow templates' to see available templates.${allNames ? ` Available: ${allNames}` : ''}`,
-  );
+  const allNames = [...builtins.map((t) => t.name), ...customTasks.map((t) => t.name)];
+  const closest = findClosestMatch(name, allNames);
+  const hint = closest ? `Did you mean: ${closest}?` : `Available: ${allNames.join(', ')}`;
+  throw new ScrowError(ErrorCode.TEMPLATE_NOT_FOUND, `Template '${name}' not found. ${hint}`);
 }

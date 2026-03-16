@@ -538,6 +538,44 @@ describe('resolveTemplate', () => {
       expect.objectContaining({ code: 'TEMPLATE_NOT_FOUND' }),
     );
   });
+
+  it('error message includes "Did you mean" suggestion when query is close to a template name', async () => {
+    vi.resetModules();
+    // Mock findClosestMatch to return a suggestion for this test
+    vi.doMock('../utils/index.js', () => ({
+      logger: { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      findClosestMatch: () => 'security-audit',
+    }));
+    const { resolveTemplate } = await import('./index.js');
+
+    let thrown: Error | null = null;
+    try {
+      resolveTemplate('secrity-audit', templates);
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown!.message).toContain('Did you mean: security-audit?');
+  });
+
+  it('error message falls back to listing available templates when no close match found', async () => {
+    vi.resetModules();
+    vi.doMock('../utils/index.js', () => ({
+      logger: { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      findClosestMatch: () => null,
+    }));
+    const { resolveTemplate } = await import('./index.js');
+
+    let thrown: Error | null = null;
+    try {
+      resolveTemplate('completely-unknown', templates);
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown!.message).toContain('Available templates:');
+    expect(thrown!.message).toContain('security-audit');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -552,6 +590,7 @@ describe('resolveAlias', () => {
     vi.resetModules();
     vi.doMock('../utils/index.js', () => ({
       logger: { warn: mockWarn, info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      findClosestMatch: () => null,
     }));
   });
 
@@ -657,6 +696,7 @@ describe('resolveTemplate — alias resolution', () => {
     vi.resetModules();
     vi.doMock('../utils/index.js', () => ({
       logger: { warn: mockWarn, info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      findClosestMatch: () => null,
     }));
   });
 
@@ -759,6 +799,7 @@ describe('resolveTemplateOrCustom — alias resolution', () => {
     vi.resetModules();
     vi.doMock('../utils/index.js', () => ({
       logger: { warn: mockWarn, info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      findClosestMatch: () => null,
     }));
   });
 
@@ -865,6 +906,34 @@ describe('resolveTemplateOrCustom — alias resolution', () => {
     expect(thrown).not.toBeNull();
     expect(thrown!.message).toContain('bug-hunter');
     expect(thrown!.message).not.toContain("'fix-bugs'");
+  });
+
+  it('error message includes "Did you mean" when findClosestMatch returns a suggestion', async () => {
+    vi.resetModules();
+    const warnMock = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../utils/index.js', () => ({
+      logger: { warn: warnMock, info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      findClosestMatch: () => 'improve-code',
+    }));
+    const { resolveTemplateOrCustom } = await import('./index.js');
+    const limitedBuiltins = [
+      {
+        name: 'improve-code',
+        description: 'desc',
+        prompt: 'p',
+        type: 'built-in' as const,
+        actions: [] as const,
+      },
+    ];
+
+    let thrown: Error | null = null;
+    try {
+      resolveTemplateOrCustom('imporve-code', limitedBuiltins, []);
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown!.message).toContain('Did you mean: improve-code?');
   });
 });
 

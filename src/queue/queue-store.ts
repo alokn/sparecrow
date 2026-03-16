@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import type { TaskDefinition } from '../types/index.js';
 import { ScrowError, ErrorCode } from '../errors/index.js';
 import { logger } from '../utils/index.js';
+import { EventName } from '../types/index.js';
 import { QueuePayloadSchema, type PersistedTask } from './queue-schema.js';
 
 const QUEUE_FILE = 'queue.json';
@@ -84,14 +85,12 @@ export class QueueStore {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      await this._handleCorruption(raw, 'JSON parse failure');
-      return { tasks: [], paused: false };
+      throw await this._handleCorruption(raw, 'JSON parse failure');
     }
 
     const result = QueuePayloadSchema.safeParse(parsed);
     if (!result.success) {
-      await this._handleCorruption(raw, 'Schema validation failure');
-      return { tasks: [], paused: false };
+      throw await this._handleCorruption(raw, 'Schema validation failure');
     }
 
     return {
@@ -126,15 +125,24 @@ export class QueueStore {
     }
   }
 
-  private async _handleCorruption(raw: string, reason: string): Promise<void> {
-    void logger.error('queue.corrupt', { reason, filePath: this.filePath });
+  private async _handleCorruption(raw: string, reason: string): Promise<ScrowError> {
+    await logger.error(EventName.QUEUE_CORRUPT, { reason, filePath: this.filePath });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = `${this.filePath}.backup-${timestamp}`;
+    const corruptPath = `${this.filePath}.corrupt.${timestamp}`;
     try {
-      await writeFile(backupPath, raw, { encoding: 'utf-8', mode: 0o600 });
-      void logger.info('queue.backup_created', { backupPath });
+      await writeFile(corruptPath, raw, { encoding: 'utf-8', mode: 0o600 });
+      await logger.info(EventName.QUEUE_CORRUPT_BACKUP_CREATED, { corruptPath });
     } catch (backupErr) {
-      void logger.error('queue.backup_failed', { backupPath }, backupErr as Error);
+      await logger.error(
+        EventName.QUEUE_CORRUPT_BACKUP_FAILED,
+        { corruptPath },
+        backupErr as Error,
+      );
     }
+    const recoveryMessage =
+      `Queue file corrupted. Run \`sparecrow queue clear --yes\` to reset, ` +
+      `or back up and inspect: ${corruptPath}`;
+    await logger.error(EventName.QUEUE_CORRUPT_RECOVERY, { message: recoveryMessage });
+    return new ScrowError(ErrorCode.QUEUE_CORRUPT, recoveryMessage);
   }
 }

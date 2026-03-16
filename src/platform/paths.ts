@@ -1,6 +1,8 @@
 /** Platform-correct path resolution via env-paths. XDG-aware on Linux. */
 import envPaths from 'env-paths';
 import { mkdir } from 'node:fs/promises';
+import { userInfo } from 'node:os';
+import { ScrowError, ErrorCode } from '../errors/index.js';
 
 const APP_NAME = 'sparecrow';
 
@@ -41,12 +43,26 @@ export async function ensureDirectories(): Promise<void> {
   const dirs = [paths.config, paths.data, paths.logs, paths.taskOutputs];
 
   await Promise.all(
-    dirs.map((dir) =>
-      mkdir(dir, {
-        recursive: true,
-        // mode 700: owner rwx only — protects sensitive credentials and state
-        mode: 0o700,
-      }),
-    ),
+    dirs.map(async (dir) => {
+      try {
+        await mkdir(dir, {
+          recursive: true,
+          // mode 700: owner rwx only — protects sensitive credentials and state
+          mode: 0o700,
+        });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EACCES' || code === 'EPERM') {
+          const username = userInfo().username;
+          throw new ScrowError(
+            ErrorCode.STATE_DIR_PERMISSION_DENIED,
+            `Permission denied: cannot create or write to ${dir}. ` +
+              `Fix with: sudo chown -R ${username} ${dir}`,
+            err instanceof Error ? err : undefined,
+          );
+        }
+        throw err;
+      }
+    }),
   );
 }

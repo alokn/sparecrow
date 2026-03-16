@@ -221,6 +221,42 @@ describe('AbstractContainerRuntime', () => {
         code: 'TASK_TIMEOUT',
       });
     }, 5000);
+
+    it('does not expose raw sensitive arg values in non-zero exit error message', async () => {
+      mockSpawnResult({ stderr: 'auth failed', exitCode: 1 });
+      const runtime = await createTestRuntime();
+
+      let thrownError: unknown;
+      try {
+        await runtime.testExecOrThrow('test-binary', ['--token', 'super-secret-value']);
+      } catch (e) {
+        thrownError = e;
+      }
+      expect(thrownError).toMatchObject({ code: 'CONTAINER_RUNTIME_ERROR' });
+      const message = (thrownError as { message: string }).message;
+      expect(message).not.toContain('super-secret-value');
+      expect(message).toContain('[REDACTED]');
+    });
+
+    it('does not expose raw sensitive arg values in timeout error message', async () => {
+      spawnMock.mockImplementation(() => {
+        const { child } = createMockChild();
+        // Never emit close -- timeout fires
+        return child;
+      });
+      const runtime = await createTestRuntime();
+
+      let thrownError: unknown;
+      try {
+        await runtime.testExecOrThrow('test-binary', ['--password', 'hunter2'], 50);
+      } catch (e) {
+        thrownError = e;
+      }
+      expect(thrownError).toMatchObject({ code: 'TASK_TIMEOUT' });
+      const message = (thrownError as { message: string }).message;
+      expect(message).not.toContain('hunter2');
+      expect(message).toContain('[REDACTED]');
+    }, 5000);
   });
 
   // --- available() tests ---

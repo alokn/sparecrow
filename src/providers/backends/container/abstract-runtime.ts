@@ -1,6 +1,7 @@
 /** AbstractContainerRuntime -- shared spawn-and-parse logic for Docker/Podman CLI wrappers. */
 import { spawn } from 'node:child_process';
 import { ScrowError, ErrorCode } from '../../../errors/index.js';
+import { formatArgsForError } from '../../../utils/index.js';
 import type {
   ContainerRuntime,
   ContainerRunOptions,
@@ -169,14 +170,14 @@ export abstract class AbstractContainerRuntime implements ContainerRuntime {
       // exitCode is null and not ENOENT -- the management command timed out
       throw new ScrowError(
         ErrorCode.TASK_TIMEOUT,
-        `Container command '${binary} ${args.join(' ')}' timed out after ${timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS}ms.`,
+        `Container command '${binary} ${formatArgsForError(args)}' timed out after ${timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS}ms.`,
       );
     }
 
     if (result.exitCode !== 0) {
       throw new ScrowError(
         ErrorCode.CONTAINER_RUNTIME_ERROR,
-        `Container command '${binary} ${args.join(' ')}' failed with exit code ${result.exitCode}: ${result.stderr.trim()}`,
+        `Container command '${binary} ${formatArgsForError(args)}' failed with exit code ${result.exitCode}: ${result.stderr.trim()}`,
       );
     }
 

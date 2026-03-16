@@ -35,6 +35,7 @@ function makePidManagerMock(overrides: Record<string, unknown> = {}) {
     isScrowDaemonProcess: async () => false,
     checkPidStatus: async () => ({ status: 'none' as const, pid: null }),
     killOrphanDaemons: async () => {},
+    getProcessName: async () => null,
     ...overrides,
   };
 }

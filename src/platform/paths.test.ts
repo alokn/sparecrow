@@ -139,4 +139,90 @@ describe('ensureDirectories()', () => {
     await ensureDirectories();
     await expect(ensureDirectories()).resolves.toBeUndefined();
   });
+
+  it('throws STATE_DIR_PERMISSION_DENIED on EACCES error', async () => {
+    vi.resetModules();
+
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.doMock('node:fs/promises', () => ({
+      ...actualFs,
+      mkdir: vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('Permission denied'), { code: 'EACCES' })),
+    }));
+    vi.doMock('env-paths', () => ({
+      default: () => ({
+        config: '/fake/config',
+        log: '/fake/state',
+        data: '/fake/state',
+        cache: '/fake/state',
+        temp: '/fake/state',
+      }),
+    }));
+
+    const { ensureDirectories } = await import('./paths.js');
+    await expect(ensureDirectories()).rejects.toMatchObject({
+      code: 'STATE_DIR_PERMISSION_DENIED',
+    });
+  });
+
+  it('throws STATE_DIR_PERMISSION_DENIED on EPERM error', async () => {
+    vi.resetModules();
+
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.doMock('node:fs/promises', () => ({
+      ...actualFs,
+      mkdir: vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })),
+    }));
+    vi.doMock('env-paths', () => ({
+      default: () => ({
+        config: '/fake/config',
+        log: '/fake/state',
+        data: '/fake/state',
+        cache: '/fake/state',
+        temp: '/fake/state',
+      }),
+    }));
+
+    const { ensureDirectories } = await import('./paths.js');
+    await expect(ensureDirectories()).rejects.toMatchObject({
+      code: 'STATE_DIR_PERMISSION_DENIED',
+    });
+  });
+
+  it('error message includes current username (not shell substitution literal)', async () => {
+    vi.resetModules();
+
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.doMock('node:fs/promises', () => ({
+      ...actualFs,
+      mkdir: vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('Permission denied'), { code: 'EACCES' })),
+    }));
+    vi.doMock('env-paths', () => ({
+      default: () => ({
+        config: '/fake/config',
+        log: '/fake/state',
+        data: '/fake/state',
+        cache: '/fake/state',
+        temp: '/fake/state',
+      }),
+    }));
+
+    const { ensureDirectories } = await import('./paths.js');
+    let thrown: Error | null = null;
+    try {
+      await ensureDirectories();
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown).not.toBeNull();
+    // Must not contain the literal shell substitution string
+    expect(thrown!.message).not.toContain('$(whoami)');
+    // Must contain a real username (non-empty string from os.userInfo)
+    expect(thrown!.message).toMatch(/sudo chown -R \S+ /);
+  });
 });
