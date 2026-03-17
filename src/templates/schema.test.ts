@@ -144,6 +144,42 @@ describe('TemplateSchema', () => {
   });
 });
 
+// ── Slug validation on template name (Story 27.1) ────────────────────────────
+
+describe('TemplateSchema slug validation', () => {
+  const validBase = { description: 'desc', prompt: 'do stuff' };
+
+  it('rejects template name containing forward slash', () => {
+    const result = TemplateSchema.safeParse({ ...validBase, name: 'path/traversal' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects template name containing backslash', () => {
+    const result = TemplateSchema.safeParse({ ...validBase, name: 'path\\traversal' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects template name containing double dots', () => {
+    const result = TemplateSchema.safeParse({ ...validBase, name: '..secret' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects template name with control characters', () => {
+    const result = TemplateSchema.safeParse({ ...validBase, name: 'my\x00template' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects template name starting with a dot', () => {
+    const result = TemplateSchema.safeParse({ ...validBase, name: '.hidden' });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts valid template name with hyphens and underscores', () => {
+    const result = TemplateSchema.safeParse({ ...validBase, name: 'my-template_v2' });
+    expect(result.success).toBe(true);
+  });
+});
+
 // ── actions field (Story 17.3 — AC1, AC3, AC4) ──────────────────────────────
 
 describe('TemplateSchema actions field', () => {

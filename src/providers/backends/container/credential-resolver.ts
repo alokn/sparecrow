@@ -35,6 +35,11 @@ export interface CredentialResolverOptions {
    * When false, mount read-write (reverts to pre-v1.1 behaviour); a `warn`-level log is
    * emitted unconditionally whenever this is set to false, regardless of whether credentials
    * currently exist on disk. Set via `mount_claude_config_readonly: false` in config.
+   *
+   * Note: This option controls ONLY the `~/.claude/` directory mount. The `~/.claude.json`
+   * file mount is ALWAYS read-only (`readonly: true`) regardless of this setting (Story 27.3).
+   * `.claude.json` stores startup metadata and cached feature gates; Claude Code tolerates
+   * read-only access — write failures are non-fatal.
    */
   mountClaudeConfigReadonly?: boolean;
 }
@@ -93,11 +98,19 @@ export async function resolveContainerCredentials(
     // Resolve container path (directory, not individual files)
     const containerClaudeDir = join(containerHome, CLAUDE_DIR_NAME);
 
-    // Check if credentials file is readable — used as a proxy for the whole .claude/ dir
+    // Probe for ~/.claude/.credentials.json (proxy for the whole .claude/ dir) and
+    // ~/.claude.json in parallel — the two access() calls are independent, so running
+    // them concurrently halves the credential-resolution latency on the hot path.
     // (R_OK matches project convention from doctor-runner.ts, repo-validation.ts)
-    const credentialsFileExists = await access(hostCredentialsPath, constants.R_OK)
-      .then(() => true)
-      .catch(() => false);
+    const hostClaudeJsonPath = join(hostHomedir, CLAUDE_JSON_FILE);
+    const [credentialsFileExists, claudeJsonExists] = await Promise.all([
+      access(hostCredentialsPath, constants.R_OK)
+        .then(() => true)
+        .catch(() => false),
+      access(hostClaudeJsonPath, constants.R_OK)
+        .then(() => true)
+        .catch(() => false),
+    ]);
 
     if (credentialsFileExists) {
       // Mount the entire .claude/ directory (not individual files) so the bind-mount
@@ -116,21 +129,18 @@ export async function resolveContainerCredentials(
       });
     }
 
-    // Probe for ~/.claude.json — a separate file in the home directory root containing
-    // startup metadata, cached feature gates, etc. Without it Claude Code emits
-    // "configuration file not found" warnings to stderr on every task execution.
-    const hostClaudeJsonPath = join(hostHomedir, CLAUDE_JSON_FILE);
-    const claudeJsonExists = await access(hostClaudeJsonPath, constants.R_OK)
-      .then(() => true)
-      .catch(() => false);
-
     if (claudeJsonExists) {
       // File-level mount is safe: target parent ($HOME) already exists in container images.
-      // Mount as read-write because Claude Code may update numStartups, cached gates, etc.
+      // Mount UNCONDITIONALLY read-only (Story 27.3, security: prevents container-side writes
+      // to host startup metadata and cached feature gates). This is NOT controlled by the
+      // `mountClaudeConfigReadonly` option — unlike ~/.claude/ (which can be overridden to
+      // read-write via `mount_claude_config_readonly: false`), .claude.json is always readonly.
+      // Claude Code tolerates a read-only .claude.json — write failures for numStartups,
+      // cached feature gates, etc. are non-fatal (it logs a warning and continues).
       mounts.push({
         source: hostClaudeJsonPath,
         target: join(containerHome, CLAUDE_JSON_FILE),
-        readonly: false,
+        readonly: true,
       });
     } else {
       // Use CONTAINER_CONFIG_FILE_MISSING (not CONTAINER_CREDENTIALS_MISSING) — this file

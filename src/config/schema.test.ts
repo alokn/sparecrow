@@ -749,3 +749,56 @@ describe('ScrowConfigSchema — idle_hours', () => {
     expect(result.trigger.idleHours).toEqual([{ start: '00:00', end: '06:00' }]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Story 27.1 — Slug validation on custom task name
+// ---------------------------------------------------------------------------
+
+describe('ScrowConfigSchema — custom task name slug validation (Story 27.1)', () => {
+  it('rejects custom task name containing forward slash', () => {
+    expect(() =>
+      ScrowConfigSchema.parse({
+        tasks: [{ name: 'path/traversal', prompt: 'do stuff', target_path: '/repo' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects custom task name containing backslash', () => {
+    expect(() =>
+      ScrowConfigSchema.parse({
+        tasks: [{ name: 'path\\traversal', prompt: 'do stuff', target_path: '/repo' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects custom task name containing double dots', () => {
+    expect(() =>
+      ScrowConfigSchema.parse({
+        tasks: [{ name: '..secret', prompt: 'do stuff', target_path: '/repo' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects custom task name with control characters', () => {
+    expect(() =>
+      ScrowConfigSchema.parse({
+        tasks: [{ name: 'my\x00task', prompt: 'do stuff', target_path: '/repo' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects custom task name starting with a dot', () => {
+    expect(() =>
+      ScrowConfigSchema.parse({
+        tasks: [{ name: '.hidden', prompt: 'do stuff', target_path: '/repo' }],
+      }),
+    ).toThrow();
+  });
+
+  it('accepts valid custom task name with hyphens and underscores', () => {
+    const result = ScrowConfigSchema.parse({
+      tasks: [{ name: 'my-task_v2', prompt: 'do stuff', target_path: '/repo' }],
+    });
+    expect(result.tasks[0]!.name).toBe('my-task_v2');
+  });
+});

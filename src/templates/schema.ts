@@ -1,6 +1,7 @@
 /** Zod schema for validating built-in template YAML objects. */
 import { z } from 'zod';
 import type { ActionType } from '../types/index.js';
+import { validateSlug } from '../utils/index.js';
 
 /**
  * Canonical action type string values derived from the ActionType union in src/types/action.ts.
@@ -18,7 +19,22 @@ export const ACTION_TYPE_VALUES = [
 export const ActionTypeSchema = z.enum(ACTION_TYPE_VALUES);
 
 export const TemplateSchema = z.object({
-  name: z.string().min(1),
+  name: z
+    .string()
+    .min(1)
+    .superRefine((val, ctx) => {
+      try {
+        validateSlug(val);
+      } catch (err) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Template name contains invalid characters (/, \\, .., control chars, or leading dot)',
+        });
+      }
+    }),
   description: z.string().min(1),
   prompt: z.string().min(1),
   timeout_minutes: z.number().int().min(0).optional(),

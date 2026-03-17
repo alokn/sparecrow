@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { ActionRequestSchema } from '../types/index.js';
 import type { ActionType } from '../types/index.js';
+import { validateSlug } from '../utils/index.js';
 
 const PersistedTaskStatusSchema = z.enum([
   'pending',
@@ -29,7 +30,22 @@ const ActionTypeSchema = z.enum(actionTypeValues);
 /** Shared fields for all persisted tasks. */
 const PersistedTaskBase = z.object({
   id: z.string().uuid(),
-  name: z.string().min(1),
+  name: z
+    .string()
+    .min(1)
+    .superRefine((val, ctx) => {
+      try {
+        validateSlug(val);
+      } catch (err) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Task name contains invalid characters (/, \\, .., control chars, or leading dot)',
+        });
+      }
+    }),
   // Backward compatibility: legacy queue.json records may not have status.
   status: PersistedTaskStatusSchema.default('pending'),
   targetPath: z.string().min(1),

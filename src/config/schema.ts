@@ -1,6 +1,7 @@
 /** Zod schema for config.yaml — maps snake_case YAML keys to camelCase TypeScript. */
 import { z } from 'zod';
 import type { ScrowConfig, ContainerConfig, TelemetryConfig } from '../types/index.js';
+import { validateSlug } from '../utils/index.js';
 
 export const ContainerConfigSchema: z.ZodType<ContainerConfig> = z
   .object({
@@ -97,7 +98,22 @@ const TriggerConfigSchema = z.object({
 });
 
 const CustomTaskSchema = z.object({
-  name: z.string().min(1),
+  name: z
+    .string()
+    .min(1)
+    .superRefine((val, ctx) => {
+      try {
+        validateSlug(val);
+      } catch (err) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Task name contains invalid characters (/, \\, .., control chars, or leading dot)',
+        });
+      }
+    }),
   prompt: z.string().min(1),
   target_path: z.string().min(1),
 });

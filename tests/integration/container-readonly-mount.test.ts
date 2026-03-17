@@ -51,15 +51,22 @@ describe('resolveContainerCredentials read-only mount (integration)', () => {
     expect(claudeDirMount!.readonly).toBe(false);
   });
 
-  it('always keeps .claude.json mount as read-write regardless of readonly setting', async () => {
-    const result = await resolveContainerCredentials({
+  it('always keeps .claude.json mount as read-only regardless of mountClaudeConfigReadonly setting', async () => {
+    const resultRo = await resolveContainerCredentials({
       hostHomedir: tmpHome,
       mountClaudeConfigReadonly: true,
     });
+    const claudeJsonMountRo = resultRo.mounts.find((m) => m.target.endsWith('.claude.json'));
+    expect(claudeJsonMountRo).toBeDefined();
+    expect(claudeJsonMountRo!.readonly).toBe(true);
 
-    const claudeJsonMount = result.mounts.find((m) => m.target.endsWith('.claude.json'));
-    expect(claudeJsonMount).toBeDefined();
-    expect(claudeJsonMount!.readonly).toBe(false);
+    const resultRw = await resolveContainerCredentials({
+      hostHomedir: tmpHome,
+      mountClaudeConfigReadonly: false,
+    });
+    const claudeJsonMountRw = resultRw.mounts.find((m) => m.target.endsWith('.claude.json'));
+    expect(claudeJsonMountRw).toBeDefined();
+    expect(claudeJsonMountRw!.readonly).toBe(true);
   });
 
   it('returns empty mounts without throwing when credential directory does not exist', async () => {

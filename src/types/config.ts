@@ -52,7 +52,11 @@ export type ContainerConfig = {
   cpuLimit: number;
   networkMode: 'bridge' | 'none' | 'host';
   mountClaudeConfig: boolean;
-  /** When true, mount ~/.claude/ read-only to prevent container writes to OAuth credentials (Story 22.1). Default: true. */
+  /**
+   * When true, mount `~/.claude/` read-only to prevent container writes to OAuth credentials
+   * (Story 22.1). Default: true. Note: `~/.claude.json` is ALWAYS mounted read-only regardless
+   * of this setting (Story 27.3) — this option controls only the `~/.claude/` directory mount.
+   */
   mountClaudeConfigReadonly: boolean;
   /** Container-side path to a pre-installed claude binary. When set, skips auto-mounting from host. */
   claudeBinaryPath?: string;

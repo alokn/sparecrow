@@ -30,3 +30,5 @@ export { levenshteinDistance, findClosestMatch } from './fuzzy-match.js';
 
 export { writeCrashReport } from './crash-reporter.js';
 export type { CrashReport, SanitisedAuditEntry, ConfigSummary } from './crash-reporter.js';
+
+export { validateSlug } from './validate-slug.js';

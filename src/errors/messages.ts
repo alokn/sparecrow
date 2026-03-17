@@ -324,6 +324,21 @@ const ERROR_MESSAGES: Record<ErrorCodeValue, ErrorUserMessage> = {
     suggestion:
       'Reinstall sparecrow (npm install -g sparecrow) or run: npm run build from the source directory',
   },
+  [ErrorCode.INVALID_SLUG]: {
+    userMessage:
+      'Name contains invalid characters. Slugs must not contain /, \\, .., control characters, or start with a dot.',
+    suggestion:
+      'Use alphanumeric characters, hyphens, underscores, and mid-name dots in names (e.g. "my-task-name" or "my.template")',
+  },
+  [ErrorCode.SYMLINK_REJECTED]: {
+    userMessage:
+      'The .scrow directory is a symbolic link, which is not allowed for security reasons.',
+    suggestion: 'Remove the symlink and create a real .scrow/ directory in the target repository',
+  },
+  [ErrorCode.PATH_TRAVERSAL_REJECTED]: {
+    userMessage: 'Result artifact path escapes the .scrow/ directory (path traversal detected).',
+    suggestion: 'Ensure template names and task IDs do not contain path traversal sequences',
+  },
 };
 
 export function getErrorMessage(code: ErrorCodeValue): ErrorUserMessage {

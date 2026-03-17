@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import type { TaskDefinition, TaskResult } from '../types/index.js';
+import { validateSlug } from '../utils/index.js';
 
 function makeTask(overrides: Partial<TaskDefinition> = {}): TaskDefinition {
   return {
@@ -73,6 +74,7 @@ describe('writeResultArtifact ENOSPC handling (AC4)', () => {
 
     vi.doMock('../utils/index.js', () => ({
       atomicWrite: vi.fn().mockRejectedValue(enospcError),
+      validateSlug,
       logger: {
         debug: vi.fn().mockResolvedValue(undefined),
         info: vi.fn().mockResolvedValue(undefined),
@@ -110,6 +112,7 @@ describe('writeResultArtifact ENOSPC handling (AC4)', () => {
 
     vi.doMock('../utils/index.js', () => ({
       atomicWrite: atomicWriteMock,
+      validateSlug,
       logger: {
         debug: vi.fn().mockResolvedValue(undefined),
         info: vi.fn().mockResolvedValue(undefined),
@@ -146,6 +149,7 @@ describe('writeResultArtifact ENOSPC handling (AC4)', () => {
 
     vi.doMock('../utils/index.js', () => ({
       atomicWrite: vi.fn().mockResolvedValue(undefined),
+      validateSlug,
       logger: {
         debug: vi.fn().mockResolvedValue(undefined),
         info: vi.fn().mockResolvedValue(undefined),

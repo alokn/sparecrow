@@ -258,6 +258,42 @@ describe('QueuePayloadSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Story 27.1 — Slug validation on task name
+// ---------------------------------------------------------------------------
+
+describe('PersistedTaskSchema — task name slug validation (Story 27.1)', () => {
+  it('rejects task name containing forward slash', () => {
+    const result = PersistedTaskSchema.safeParse(makeCustomTask({ name: 'path/traversal' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects task name containing backslash', () => {
+    const result = PersistedTaskSchema.safeParse(makeCustomTask({ name: 'path\\traversal' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects task name containing double dots', () => {
+    const result = PersistedTaskSchema.safeParse(makeCustomTask({ name: '..secret' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects task name with control characters', () => {
+    const result = PersistedTaskSchema.safeParse(makeCustomTask({ name: 'my\x00task' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects task name starting with a dot', () => {
+    const result = PersistedTaskSchema.safeParse(makeCustomTask({ name: '.hidden' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts valid task name with hyphens and underscores', () => {
+    const result = PersistedTaskSchema.safeParse(makeCustomTask({ name: 'my-task_v2' }));
+    expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Story 18.1 AC5 — Task ID constrained to UUID format
 // ---------------------------------------------------------------------------
 

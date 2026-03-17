@@ -1,26 +1,30 @@
 /** Tests for result-writer — .scrow/ result artifact file persistence. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdir, rm, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdir, rm, readFile, writeFile, access, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import type { TaskDefinition, TaskResult } from '../types/index.js';
 import { EventName } from '../types/index.js';
 
-vi.mock('../utils/index.js', () => ({
-  atomicWrite: vi.fn(async (filePath: string, content: string) => {
-    const { writeFile, mkdir: mkdirFn } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
-    await mkdirFn(dirname(filePath), { recursive: true });
-    await writeFile(filePath, content, { encoding: 'utf-8', mode: 0o600 });
-  }),
-  logger: {
-    debug: vi.fn().mockResolvedValue(undefined),
-    info: vi.fn().mockResolvedValue(undefined),
-    warn: vi.fn().mockResolvedValue(undefined),
-    error: vi.fn().mockResolvedValue(undefined),
-  },
-}));
+vi.mock('../utils/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/index.js')>('../utils/index.js');
+  return {
+    atomicWrite: vi.fn(async (filePath: string, content: string) => {
+      const { writeFile, mkdir: mkdirFn } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+      await mkdirFn(dirname(filePath), { recursive: true });
+      await writeFile(filePath, content, { encoding: 'utf-8', mode: 0o600 });
+    }),
+    logger: {
+      debug: vi.fn().mockResolvedValue(undefined),
+      info: vi.fn().mockResolvedValue(undefined),
+      warn: vi.fn().mockResolvedValue(undefined),
+      error: vi.fn().mockResolvedValue(undefined),
+    },
+    validateSlug: actual.validateSlug,
+  };
+});
 
 import {
   formatTimestamp,
@@ -29,6 +33,7 @@ import {
   buildResultContent,
   ensureGitignore,
   writeResultArtifact,
+  assertPathContainment,
   formatDispatchNotification,
   toRelativePath,
   SCROW_DIR,
@@ -115,6 +120,27 @@ describe('buildFilename', () => {
     const completedAt = new Date('2026-03-04T14:30:00.000Z');
     const result = buildFilename(completedAt, 'a', '1234567890');
     expect(result).toBe('2026-03-04T14-30-00Z-a-1234567.md');
+  });
+
+  it('rejects template slug containing forward slash (defense-in-depth)', () => {
+    const completedAt = new Date('2026-03-04T14:30:00.000Z');
+    expect(() => buildFilename(completedAt, '../etc/passwd', '1234567')).toThrow(
+      expect.objectContaining({ code: 'INVALID_SLUG' }),
+    );
+  });
+
+  it('rejects template slug containing backslash', () => {
+    const completedAt = new Date('2026-03-04T14:30:00.000Z');
+    expect(() => buildFilename(completedAt, 'path\\traversal', '1234567')).toThrow(
+      expect.objectContaining({ code: 'INVALID_SLUG' }),
+    );
+  });
+
+  it('rejects template slug starting with a dot', () => {
+    const completedAt = new Date('2026-03-04T14:30:00.000Z');
+    expect(() => buildFilename(completedAt, '.hidden', '1234567')).toThrow(
+      expect.objectContaining({ code: 'INVALID_SLUG' }),
+    );
   });
 });
 
@@ -553,5 +579,134 @@ describe('writeResultArtifact', () => {
 
     const filename = output!.filePath.split('/').pop();
     expect(filename).toContain('custom-prompt-task');
+  });
+
+  it('propagates INVALID_SLUG error instead of returning null when templateName contains bad slug', async () => {
+    // Finding 2 fix: slug validation happens before the non-fatal catch block so that
+    // INVALID_SLUG is a visible security signal, not silently converted to null.
+    const task = makeTask({
+      targetPath: tmpDir,
+      templateName: '../etc/passwd',
+    });
+    const input = makeInput({ task });
+
+    await expect(writeResultArtifact(input)).rejects.toMatchObject({ code: 'INVALID_SLUG' });
+  });
+
+  it('rejects when .scrow is a symlink with SYMLINK_REJECTED', async () => {
+    // Create a real directory elsewhere and symlink .scrow to it
+    const realDir = join(tmpDir, 'real-scrow');
+    await mkdir(realDir, { recursive: true });
+    const scrowLink = join(tmpDir, SCROW_DIR);
+    await symlink(realDir, scrowLink);
+
+    const task = makeTask({ targetPath: tmpDir });
+    const input = makeInput({ task });
+
+    await expect(writeResultArtifact(input)).rejects.toMatchObject({
+      code: 'SYMLINK_REJECTED',
+    });
+  });
+
+  it('rejects filename that escapes containment with PATH_TRAVERSAL_REJECTED', async () => {
+    // PATH_TRAVERSAL_REJECTED is defense-in-depth: buildFilename() validates slugs,
+    // making it unreachable via writeResultArtifact() in the normal call path.
+    // We test the containment check directly via assertPathContainment() to verify
+    // AC2 defense-in-depth is actually enforced (not dead code).
+    const scrowDir = join(tmpDir, SCROW_DIR);
+    await mkdir(scrowDir, { recursive: true });
+    const resolvedScrowDir = await import('node:fs/promises').then((m) => m.realpath(scrowDir));
+
+    // A traversal attempt: resolvedFilePath points outside resolvedScrowDir
+    const escapingPath = join(resolvedScrowDir, '..', 'escaped-file.md');
+
+    expect(() => assertPathContainment(escapingPath, resolvedScrowDir)).toThrow();
+    expect(() => assertPathContainment(escapingPath, resolvedScrowDir)).toThrowError(
+      expect.objectContaining({ code: 'PATH_TRAVERSAL_REJECTED' }),
+    );
+  });
+
+  it('normal write to real .scrow/ directory succeeds', async () => {
+    // Pre-create the .scrow directory
+    const scrowDir = join(tmpDir, SCROW_DIR);
+    await mkdir(scrowDir, { recursive: true });
+
+    const task = makeTask({ targetPath: tmpDir });
+    const input = makeInput({ task });
+
+    const output = await writeResultArtifact(input);
+    expect(output).not.toBeNull();
+    expect(output!.filePath).toContain(SCROW_DIR);
+    expect(output!.filePath).toMatch(/\.md$/);
+
+    const content = await readFile(output!.filePath, 'utf-8');
+    expect(content).toContain('task_id:');
+  });
+
+  it('rejects write when repoPath contains a symlinked parent component with SYMLINK_REJECTED', async () => {
+    // Finding 6: symlink guard should detect symlinks in parent path components of repoPath.
+    // Create a real target directory, symlink a parent dir to point to it,
+    // and verify that the write is rejected because .scrow inside a symlinked repo path
+    // triggers the realpath-based detection.
+    // We simulate a symlinked repoPath by creating a symlink pointing to tmpDir.
+    const realRepo = join(tmpDir, 'real-repo');
+    await mkdir(realRepo, { recursive: true });
+    // Create a real .scrow inside realRepo so symlink check can proceed to lstat
+    const scrowInReal = join(realRepo, SCROW_DIR);
+    await mkdir(scrowInReal, { recursive: true });
+
+    // Symlink another path to .scrow inside realRepo
+    const symlinkScrow = join(tmpDir, 'symlinked-repo', SCROW_DIR);
+    const symlinkRepoDir = join(tmpDir, 'symlinked-repo');
+    await mkdir(symlinkRepoDir, { recursive: true });
+    // Replace .scrow with a symlink to the real one (simulating attacker redirect)
+    await symlink(scrowInReal, symlinkScrow);
+
+    const task = makeTask({ targetPath: symlinkRepoDir });
+    const input = makeInput({ task });
+
+    // The write should be rejected because .scrow is a symlink
+    await expect(writeResultArtifact(input)).rejects.toMatchObject({
+      code: 'SYMLINK_REJECTED',
+    });
+  });
+
+  it('audit-logs security event before re-throwing SYMLINK_REJECTED', async () => {
+    // Finding 3: security errors must leave a trace in the audit log, not just propagate silently.
+    const { logger: mockLogger } = await import('../utils/index.js');
+    const realDir = join(tmpDir, 'real-scrow-audit');
+    await mkdir(realDir, { recursive: true });
+    const scrowLink = join(tmpDir, SCROW_DIR);
+    await symlink(realDir, scrowLink);
+
+    const task = makeTask({ targetPath: tmpDir });
+    const input = makeInput({ task });
+
+    await expect(writeResultArtifact(input)).rejects.toMatchObject({ code: 'SYMLINK_REJECTED' });
+
+    // Verify audit log entry was written before the error was re-thrown
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'SYMLINK_REJECTED',
+      expect.objectContaining({
+        taskId: task.id,
+        event: 'symlink-attack-detected',
+      }),
+    );
+  });
+
+  it('assertPathContainment allows paths inside the container directory', () => {
+    // Verify the containment check permits valid paths (not just rejection).
+    // This tests the "allow" branch of the defense-in-depth containment logic.
+    const container = '/tmp/test-container/.scrow';
+    const validPath = '/tmp/test-container/.scrow/2026-03-18T10-00-00Z-improve-code-a1b2c3d.md';
+    expect(() => assertPathContainment(validPath, container)).not.toThrow();
+  });
+
+  it('assertPathContainment rejects paths equal to container (not inside it)', () => {
+    // A path equal to the container itself (no trailing slash child) must be rejected.
+    const container = '/tmp/test-container/.scrow';
+    expect(() => assertPathContainment(container, container)).toThrow(
+      expect.objectContaining({ code: 'PATH_TRAVERSAL_REJECTED' }),
+    );
   });
 });

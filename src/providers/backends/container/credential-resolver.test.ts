@@ -324,7 +324,7 @@ describe('resolveContainerCredentials', () => {
     expect(claudeJsonMount).toBeDefined();
     expect(claudeJsonMount!.source).toBe('/home/testuser/.claude.json');
     expect(claudeJsonMount!.target).toBe('/root/.claude.json');
-    expect(claudeJsonMount!.readonly).toBe(false);
+    expect(claudeJsonMount!.readonly).toBe(true);
   });
 
   // 10.10 AC2: .claude.json mount omitted when .claude.json does not exist
@@ -476,8 +476,8 @@ describe('resolveContainerCredentials', () => {
     expect(claudeDirMount!.readonly).toBe(true);
   });
 
-  // 22.1: .claude.json file mount remains read-write regardless of mountClaudeConfigReadonly
-  it('keeps .claude.json file mount as read-write even when mountClaudeConfigReadonly is true', async () => {
+  // 27.3: .claude.json file mount is now read-only (security: prevents container-side host writes)
+  it('mounts .claude.json file as read-only (consistent with ~/.claude/ directory mount)', async () => {
     const result = await resolveContainerCredentials({
       hostHomedir: '/home/testuser',
       mountClaudeConfigReadonly: true,
@@ -485,7 +485,7 @@ describe('resolveContainerCredentials', () => {
 
     const claudeJsonMount = result.mounts.find((m) => m.target.endsWith('.claude.json'));
     expect(claudeJsonMount).toBeDefined();
-    expect(claudeJsonMount!.readonly).toBe(false);
+    expect(claudeJsonMount!.readonly).toBe(true);
   });
 
   // 22.1: mountClaudeConfigReadonly has no effect when mountClaudeConfig is false
@@ -534,6 +534,32 @@ describe('resolveContainerCredentials', () => {
     const claudeDirMount = result.mounts.find((m) => m.target === '/home/node/.claude');
     expect(claudeDirMount).toBeDefined();
     expect(claudeDirMount!.readonly).toBe(true);
+  });
+
+  // ─── Story 27.3: .claude.json read-only mount tests ──────────────────────────
+
+  // 27.3 AC1: .claude.json mount is read-only by default
+  it('mounts ~/.claude.json as read-only by default (readonly: true)', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+    });
+
+    const claudeJsonMount = result.mounts.find((m) => m.target.endsWith('.claude.json'));
+    expect(claudeJsonMount).toBeDefined();
+    expect(claudeJsonMount!.readonly).toBe(true);
+  });
+
+  // 27.3 AC2: .claude.json mount remains read-only even when mountClaudeConfigReadonly is false
+  // (mountClaudeConfigReadonly controls ~/.claude/ dir only; .claude.json is always read-only)
+  it('mounts ~/.claude.json as read-only unconditionally regardless of mountClaudeConfigReadonly', async () => {
+    const result = await resolveContainerCredentials({
+      hostHomedir: '/home/testuser',
+      mountClaudeConfigReadonly: false,
+    });
+
+    const claudeJsonMount = result.mounts.find((m) => m.target.endsWith('.claude.json'));
+    expect(claudeJsonMount).toBeDefined();
+    expect(claudeJsonMount!.readonly).toBe(true);
   });
 
   // 10.10 Low: String(err) catch branch — non-Error thrown value exercises String(err) path
