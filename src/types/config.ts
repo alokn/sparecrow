@@ -20,12 +20,24 @@ export interface IdleHoursEntry {
   days?: DayOfWeek[];
 }
 
+/**
+ * Capacity trigger thresholds and idle-hours schedule.
+ *
+ * Controls when the daemon considers spare capacity available to dispatch
+ * queued tasks. All percentage fields are in the range 0–100.
+ */
 export interface TriggerConfig {
   maxWastePercentage: number; // 0-100; default 50
   weeklyReservePercentage: number; // 0-100; default 30
   idleHours: IdleHoursEntry[]; // idle time ranges; default []
 }
 
+/**
+ * A user-defined custom task that sparecrow can dispatch against a repository.
+ *
+ * Custom tasks supplement built-in templates when the user needs a bespoke
+ * prompt. Each task must have a unique `name` used to identify it in the queue.
+ */
 export interface CustomTaskConfig {
   name: string;
   prompt: string;
@@ -48,6 +60,12 @@ export type ContainerConfig = {
   mountClaudeBinary?: boolean;
 };
 
+/**
+ * Provider and execution backend configuration for sparecrow.
+ *
+ * Specifies which Claude Code provider to use and how tasks are executed
+ * (currently `'container'` is the only supported `executionBackend`).
+ */
 export interface ProviderConfig {
   name: string; // e.g. "claude-code"
   claudePath?: string; // absolute path to claude binary (set during onboarding)
@@ -63,14 +81,33 @@ export interface TelemetryConfig {
   endpoint: string; // HTTPS endpoint for telemetry events
 }
 
+/**
+ * Root configuration object for sparecrow, loaded from `config.yaml`.
+ *
+ * YAML keys use `snake_case` and are transformed to `camelCase` by the
+ * Zod schema in `src/config/schema.ts`. All fields have sensible defaults
+ * so the minimal valid config is an empty YAML file.
+ *
+ * @see {@link TriggerConfig} for capacity trigger settings.
+ * @see {@link ProviderConfig} for provider and execution backend settings.
+ */
 export interface ScrowConfig {
-  pollingInterval: number; // seconds; 60-3600; default 300
-  logRetentionDays: number; // default 30
-  taskTimeoutMinutes: number; // 0 = no timeout; default 60; min 0
+  /** Daemon polling interval in seconds (60-3600). Default: 300. */
+  pollingInterval: number;
+  /** Number of days to retain audit log files. Default: 30. */
+  logRetentionDays: number;
+  /** Maximum task execution time in minutes. 0 disables the timeout. Default: 60. */
+  taskTimeoutMinutes: number;
+  /** Provider and execution backend configuration. */
   provider: ProviderConfig;
+  /** Capacity trigger thresholds and idle hours schedule. */
   trigger: TriggerConfig;
-  tasks: CustomTaskConfig[]; // custom prompts (Story 3.4)
-  lastSummaryEnabled: boolean; // write last-summary.txt after dispatch (last-summary.json unchanged); default false
-  wslMountPrefix: string; // WSL Windows-hosted mount prefix for permission-check bypass; default '/mnt/'
-  telemetry: TelemetryConfig; // opt-in anonymous telemetry (Story 24.1)
+  /** User-defined custom task prompts. */
+  tasks: CustomTaskConfig[];
+  /** When true, write human-readable last-summary.txt after dispatch. Default: false. */
+  lastSummaryEnabled: boolean;
+  /** WSL Windows-hosted mount prefix for permission-check bypass. Default: '/mnt/'. */
+  wslMountPrefix: string;
+  /** Opt-in anonymous telemetry configuration. */
+  telemetry: TelemetryConfig;
 }

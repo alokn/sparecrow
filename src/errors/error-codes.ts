@@ -73,6 +73,7 @@ export const ErrorCode = Object.freeze({
   STATS_COMPUTATION_FAILED: 'STATS_COMPUTATION_FAILED',
   CRASH_REPORT_NOT_FOUND: 'CRASH_REPORT_NOT_FOUND',
   CRASH_REPORT_INVALID: 'CRASH_REPORT_INVALID',
+  MAN_PAGE_NOT_FOUND: 'MAN_PAGE_NOT_FOUND',
 } as const);
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];

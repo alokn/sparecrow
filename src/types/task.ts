@@ -8,34 +8,68 @@ export type TaskStatus = 'pending' | 'in-progress' | 'done' | 'failed' | 'failed
 /** Opaque string alias for error code values — keeps types/ free of errors/ imports. */
 export type TaskErrorCode = string;
 
+/**
+ * In-memory representation of a queued task ready for dispatch.
+ *
+ * Tasks are created via `sparecrow queue add` (CLI) or the onboarding wizard,
+ * persisted as `PersistedTask` in `queue.json`, and hydrated into this
+ * interface before execution by the dispatcher.
+ *
+ * @see {@link TaskResult} for the output produced after execution.
+ */
 export interface TaskDefinition {
+  /** Unique task identifier (UUID v4). */
   id: string;
+  /** Human-readable task name shown in queue listings and logs. */
   name: string;
+  /** Discriminator: 'template' for built-in/custom templates, 'custom' for ad-hoc prompts. */
   type: 'template' | 'custom';
+  /** Template key when `type` is 'template'. */
   templateName?: string;
   /** Persisted queue status. Legacy queue.json records missing this field are migrated to "pending" by the schema layer. */
   status: TaskStatus;
+  /** The prompt text sent to Claude Code for execution. */
   prompt: string;
+  /** Absolute path to the git repository targeted by this task. */
   targetPath: string;
+  /** Execution priority (1 = highest). Priorities are normalized to contiguous 1-based after every mutation. */
   priority: number;
+  /** Timestamp when the task was added to the queue. */
   createdAt: Date;
   /** Timestamp when the task transitioned to a terminal status (done/failed/skipped). Absent for pending/in-progress tasks. */
   completedAt?: Date;
-  timeoutMs: number; // default 60 * 60 * 1000 (60 min)
+  /** Maximum execution time in milliseconds. Default: 3,600,000 (60 min). */
+  timeoutMs: number;
   /** Declared action types from the template manifest (for post-execution pipeline). Always present; defaults to []. */
   actions: ReadonlyArray<ActionType>;
 }
 
+/**
+ * Result produced by executing a single task via the dispatcher.
+ *
+ * Contains the full stdout/stderr capture, timing information, and any
+ * error details. Written to the audit log and used by the report command.
+ */
 export interface TaskResult {
+  /** ID of the executed task (matches {@link TaskDefinition.id}). */
   taskId: string;
+  /** Final status after execution. */
   status: TaskStatus;
+  /** Timestamp when execution began. */
   startedAt: Date;
+  /** Timestamp when execution finished. */
   completedAt: Date;
+  /** Wall-clock execution duration in milliseconds. */
   durationMs: number;
+  /** Captured standard output from the Claude Code process. */
   stdout: string;
+  /** Captured standard error from the Claude Code process. */
   stderr: string;
+  /** Process exit code, or null if the process was killed by a signal. */
   exitCode: number | null;
+  /** Human-readable error description, or null on success. */
   error: string | null;
+  /** Typed error code for programmatic handling, or null on success. */
   errorCode: TaskErrorCode | null;
 }
 

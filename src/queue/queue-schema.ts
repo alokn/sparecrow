@@ -79,6 +79,19 @@ const QueuePayloadSchema = z.object({
   paused: z.boolean().default(false),
 });
 
+/**
+ * Serialized form of a queued task as stored in `queue.json`.
+ *
+ * This is a discriminated union on `type`:
+ * - `'template'` tasks require a `templateName` field.
+ * - `'custom'` tasks have a user-supplied `prompt`.
+ *
+ * Dates are stored as ISO 8601 strings (not `Date` objects) for JSON round-tripping.
+ * The TypeScript type exposes `createdAt: string` — the ISO 8601 constraint is a
+ * Zod-validated runtime guarantee enforced by `PersistedTaskSchema`, not a compile-time
+ * type-level guarantee.
+ * The schema applies backward-compatible defaults for fields added after v1 (`status`, `actions`).
+ */
 export type PersistedTask = z.infer<typeof PersistedTaskSchema>;
 export type QueuePayload = z.infer<typeof QueuePayloadSchema>;
 export { QueuePayloadSchema, PersistedTaskSchema };

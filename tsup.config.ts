@@ -2,8 +2,9 @@
 import { defineConfig } from 'tsup';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
-import { readdir, mkdir, copyFile, rm } from 'node:fs/promises';
+import { readdir, mkdir, copyFile, rm, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { execFile } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,12 +52,25 @@ export default defineConfig({
       await Promise.all(yamlFiles.map((file) => copyFile(join(srcDir, file), join(destDir, file))));
 
       console.log(`[tsup] Copied ${yamlFiles.length} YAML template(s) to dist/builtin/`);
+
+      // Generate man page from markdown source using marked-man
+      const manSrc = join(__dirname, 'docs', 'sparecrow.1.md');
+      const manDest = join(__dirname, 'dist', 'sparecrow.1');
+      const markedManBin = join(__dirname, 'node_modules', '.bin', 'marked-man');
+      const manRoff = await new Promise<string>((resolve, reject) => {
+        execFile(markedManBin, [manSrc], { encoding: 'utf-8' }, (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout);
+        });
+      });
+      await writeFile(manDest, manRoff, 'utf-8');
+      console.log('[tsup] Generated man page: dist/sparecrow.1');
     } catch (err) {
       // Surface errors as a hard build failure so CI/CD and developers know immediately
-      // when the copy step breaks, rather than getting a confusing TEMPLATE_LOAD_ERROR at
-      // runtime.
+      // when either the YAML template copy or man page generation step breaks, rather than
+      // getting a confusing runtime error.
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`[tsup] Failed to copy builtin YAML templates to dist/builtin/: ${message}`);
+      throw new Error(`[tsup] onSuccess failed: ${message}`);
     }
   },
 });

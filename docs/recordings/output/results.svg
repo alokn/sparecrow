@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" width="900" height="500">
+  <defs>
+    <style>
+      .bg { fill: #1e1e2e; }
+      .bar { fill: #313244; }
+      .dot-red { fill: #f38ba8; }
+      .dot-yellow { fill: #f9e2af; }
+      .dot-green { fill: #a6e3a1; }
+      .prompt { fill: #cdd6f4; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 14px; }
+      .command { fill: #89b4fa; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 14px; }
+      .output { fill: #a6adc8; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 13px; }
+      .success { fill: #a6e3a1; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 13px; }
+      .accent { fill: #cba6f7; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 13px; }
+      .dim { fill: #6c7086; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; }
+      .title { fill: #cdd6f4; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 14px; font-weight: bold; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect class="bg" width="900" height="500" rx="8"/>
+
+  <!-- Title bar -->
+  <rect class="bar" width="900" height="40" rx="8"/>
+  <rect class="bg" y="32" width="900" height="10"/>
+  <circle class="dot-red" cx="20" cy="20" r="6"/>
+  <circle class="dot-yellow" cx="40" cy="20" r="6"/>
+  <circle class="dot-green" cx="60" cy="20" r="6"/>
+  <text class="title" x="450" y="25" text-anchor="middle">sparecrow results</text>
+
+  <!-- Command -->
+  <text class="prompt" x="20" y="70">$</text>
+  <text class="command" x="35" y="70">sparecrow results</text>
+
+  <!-- Results listing -->
+  <text class="accent" x="20" y="100">Found 4 result artifacts across 2 repositories:</text>
+
+  <text class="output" x="20" y="130">/home/user/my-project/.scrow/</text>
+  <text class="success" x="40" y="150">security-audit-2026-03-17T02-45-00.md    6.2 KB</text>
+  <text class="success" x="40" y="170">improve-code-2026-03-17T03-00-00.md      4.8 KB</text>
+
+  <text class="output" x="20" y="200">/home/user/api/.scrow/</text>
+  <text class="success" x="40" y="220">write-tests-2026-03-17T01-30-00.md       12.1 KB</text>
+  <text class="success" x="40" y="240">fix-bugs-2026-03-16T22-00-00.md          8.3 KB</text>
+
+  <!-- Latest result command -->
+  <text class="prompt" x="20" y="280">$</text>
+  <text class="command" x="35" y="280">sparecrow results --latest</text>
+
+  <!-- Latest result detail -->
+  <text class="accent" x="20" y="310">improve-code-2026-03-17T03-00-00.md</text>
+  <text class="output" x="20" y="335">Repository:  /home/user/my-project</text>
+  <text class="output" x="20" y="355">Template:    improve-code</text>
+  <text class="output" x="20" y="375">Duration:    8m 45s</text>
+  <text class="output" x="20" y="395">Created:     2026-03-17T03:00:00.000Z</text>
+  <text class="output" x="20" y="415">Size:        4.8 KB</text>
+
+  <text class="success" x="20" y="445">Actions: branch created, 3 commits pushed, PR #42 opened</text>
+
+</svg>

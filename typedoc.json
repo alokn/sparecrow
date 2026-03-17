@@ -1,0 +1,27 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/types/index.ts",
+    "src/errors/index.ts",
+    "src/config/index.ts",
+    "src/queue/index.ts",
+    "src/templates/index.ts",
+    "src/providers/index.ts",
+    "src/trigger/index.ts",
+    "src/daemon/index.ts",
+    "src/platform/index.ts",
+    "src/utils/index.ts",
+    "src/cli/index.ts",
+    "src/ui/index.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "out": "docs/api",
+  "name": "sparecrow API Documentation",
+  "readme": "README.md",
+  "cleanOutputDir": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "skipErrorChecking": true,
+  "tsconfig": "tsconfig.json"
+}

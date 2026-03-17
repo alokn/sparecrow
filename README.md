@@ -6,6 +6,10 @@
   <img src="assets/sparecrow_logo.PNG" alt="SpareCrow logo" width="500">
 </p>
 
+<p align="center">
+  <img src="docs/recordings/output/hero.svg" alt="sparecrow demo: onboard, queue a task, check status" width="800">
+</p>
+
 > **Public Beta** -- sparecrow 1.0.0-beta.1 is the first public release. Install with `npm install -g sparecrow@beta`. Report issues at [github.com/alokn/sparecrow/issues](https://github.com/alokn/sparecrow/issues).
 
 `sparecrow` is a CLI tool and background daemon that monitors your Claude Code subscription usage and automatically dispatches queued tasks against your repositories when spare capacity is detected. Stop leaving your Claude Pro/Team quota on the table -- put it to work.

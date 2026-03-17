@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpareCrow — Make Your Claude Code Subscription Count</title>
+  <meta name="description" content="SpareCrow is a CLI tool and background daemon that monitors your Claude Code subscription usage and dispatches queued tasks when spare capacity is detected.">
+  <meta name="theme-color" content="#1a1a2e">
+  <!-- Open Graph -->
+  <meta property="og:title" content="SpareCrow — Make Your Claude Code Subscription Count">
+  <meta property="og:description" content="A CLI daemon that detects unused Claude Code capacity and automatically runs queued tasks against your repos. Stop leaving subscription quota on the table.">
+  <meta property="og:image" content="https://alokn.github.io/sparecrow/recordings/output/hero.svg">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://alokn.github.io/sparecrow/">
+  <!-- Favicon -->
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <style>
+    /* Reset and base */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      color: #e0e0e0;
+      background: #0d1117;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Focus styles — WCAG 2.1 SC 2.4.7 */
+    :focus-visible {
+      outline: 2px solid #58a6ff;
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    /* Layout */
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Header / Nav */
+    header {
+      padding: 16px 0;
+      border-bottom: 1px solid #21262d;
+      position: sticky;
+      top: 0;
+      background: rgba(13, 17, 23, 0.95);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+    header .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo-text {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      letter-spacing: -0.02em;
+    }
+    .logo-text span { color: #58a6ff; }
+    nav a {
+      margin-left: 24px;
+      font-size: 0.9rem;
+      color: #8b949e;
+    }
+    nav a:hover { color: #f0f6fc; }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 0 48px;
+    }
+    .hero-logo {
+      width: 180px;
+      height: auto;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      color: #f0f6fc;
+      margin-bottom: 16px;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+    .hero h1 em {
+      font-style: normal;
+      color: #58a6ff;
+    }
+    .hero .tagline {
+      font-size: 1.25rem;
+      color: #8b949e;
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+
+    /* Install CTA */
+    .install-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 24px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 1rem;
+      color: #7ee787;
+      user-select: text;
+      margin-bottom: 12px;
+    }
+    .install-cta .prompt { color: #8b949e; user-select: none; }
+    .cta-hint {
+      font-size: 0.85rem;
+      color: #484f58;
+    }
+
+    /* Demo recording */
+    .demo {
+      margin: 48px auto;
+      max-width: 800px;
+    }
+    .demo img {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border: 1px solid #21262d;
+    }
+    .demo-caption {
+      text-align: center;
+      font-size: 0.85rem;
+      color: #484f58;
+      margin-top: 8px;
+    }
+
+    /* Features */
+    .features {
+      padding: 64px 0;
+    }
+    .features h2 {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 48px;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 32px;
+    }
+    .feature-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      padding: 28px;
+    }
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+      display: block;
+    }
+    .feature-card h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #f0f6fc;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 0.95rem;
+      color: #8b949e;
+    }
+
+    /* How it works */
+    .how-it-works {
+      padding: 64px 0;
+      border-top: 1px solid #21262d;
+    }
+    .how-it-works h2 {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 48px;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .step {
+      text-align: center;
+      padding: 24px 16px;
+    }
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #1f6feb;
+      color: #fff;
+      font-weight: 700;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+    }
+    .step h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #f0f6fc;
+      margin-bottom: 8px;
+    }
+    .step p {
+      font-size: 0.9rem;
+      color: #8b949e;
+    }
+
+    /* Bottom CTA */
+    .bottom-cta {
+      text-align: center;
+      padding: 64px 0;
+      border-top: 1px solid #21262d;
+    }
+    .bottom-cta h2 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 16px;
+    }
+    .bottom-cta p {
+      color: #8b949e;
+      margin-bottom: 32px;
+      font-size: 1.1rem;
+    }
+    .btn {
+      display: inline-block;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: #238636;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #2ea043; text-decoration: none; }
+    .btn-secondary {
+      background: transparent;
+      color: #58a6ff;
+      border: 1px solid #30363d;
+      margin-left: 12px;
+    }
+    .btn-secondary:hover { border-color: #58a6ff; text-decoration: none; }
+
+    /* Footer */
+    footer {
+      padding: 32px 0;
+      border-top: 1px solid #21262d;
+      text-align: center;
+      font-size: 0.85rem;
+      color: #484f58;
+    }
+    footer a { color: #58a6ff; }
+    footer .footer-links {
+      margin-bottom: 12px;
+    }
+    footer .footer-links a {
+      margin: 0 12px;
+    }
+
+    /* Responsive: tablet */
+    @media (max-width: 768px) {
+      .hero { padding: 48px 0 32px; }
+      .hero h1 { font-size: 2rem; }
+      .hero .tagline { font-size: 1.1rem; }
+      .features-grid { grid-template-columns: 1fr; gap: 20px; }
+      .steps { grid-template-columns: 1fr; gap: 16px; }
+      .install-cta { font-size: 0.9rem; padding: 12px 16px; }
+      nav a { margin-left: 16px; font-size: 0.8rem; }
+      .btn-secondary { margin-left: 0; margin-top: 12px; display: block; }
+    }
+
+    /* Responsive: small mobile */
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 1.6rem; }
+      .hero .tagline { font-size: 1rem; }
+      .hero-logo { width: 120px; }
+      header .container { flex-wrap: wrap; gap: 8px; }
+      nav { width: 100%; }
+      nav a { margin-left: 0; margin-right: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="container">
+      <div class="logo-text">Spare<span>Crow</span></div>
+      <nav aria-label="Main navigation">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="https://github.com/alokn/sparecrow" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero section -->
+    <section class="hero">
+      <div class="container">
+        <img src="assets/sparecrow_logo.PNG" alt="SpareCrow logo" class="hero-logo" width="180" height="180">
+        <h1>Make Your Claude Code<br>Subscription <em>Count</em></h1>
+        <p class="tagline">
+          A CLI daemon that detects unused Claude Code capacity and automatically runs queued tasks against your repos. Stop leaving subscription quota on the table.
+        </p>
+        <div class="install-cta">
+          <span class="prompt">$</span> npm install -g sparecrow@beta
+        </div>
+        <div class="cta-hint">Requires Node.js 22+ and Docker/Podman</div>
+      </div>
+    </section>
+
+    <!-- Demo recording -->
+    <section class="demo">
+      <img src="recordings/output/hero.svg" alt="sparecrow demo: onboard, queue a task, and check status in the terminal" width="800" height="450" loading="eager">
+      <p class="demo-caption">Onboard, queue a security audit, check status &mdash; in seconds</p>
+    </section>
+
+    <!-- Features -->
+    <section class="features" id="features">
+      <div class="container">
+        <h2>Why SpareCrow?</h2>
+        <div class="features-grid">
+
+          <div class="feature-card">
+            <span class="feature-icon" aria-hidden="true">&#x1F4CA;</span>
+            <h3>Capacity Intelligence</h3>
+            <p>Monitors your Claude Pro/Team subscription in real time. Calculates waste potential across all model tiers and dispatches tasks only when surplus capacity exists.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-icon" aria-hidden="true">&#x1F512;</span>
+            <h3>Container-Isolated Execution</h3>
+            <p>Every task runs inside a Docker or Podman container with read-only credential mounts, resource limits, and full network isolation. Your code stays safe.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-icon" aria-hidden="true">&#x1F4DD;</span>
+            <h3>Built-in Templates</h3>
+            <p>Ship with security audits, code reviews, bug hunting, and test generation templates. Create custom prompts or bring your own.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-icon" aria-hidden="true">&#x2699;&#xFE0F;</span>
+            <h3>Set It and Forget It</h3>
+            <p>A background daemon polls usage, evaluates triggers, and dispatches tasks automatically. Results land in your repo as structured artifacts.</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="how-it-works" id="how-it-works">
+      <div class="container">
+        <h2>How It Works</h2>
+        <div class="steps">
+
+          <div class="step">
+            <div class="step-number">1</div>
+            <h3>Authenticate</h3>
+            <p>SpareCrow reads your existing Claude Code OAuth token. No extra credentials needed.</p>
+          </div>
+
+          <div class="step">
+            <div class="step-number">2</div>
+            <h3>Queue Tasks</h3>
+            <p>Add security audits, code reviews, or custom prompts to your task queue targeting any repository.</p>
+          </div>
+
+          <div class="step">
+            <div class="step-number">3</div>
+            <h3>Auto-Dispatch</h3>
+            <p>The daemon detects spare capacity, spins up a container, and runs the next task. Results appear in your repo.</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom CTA -->
+    <section class="bottom-cta">
+      <div class="container">
+        <h2>Ready to put your spare capacity to work?</h2>
+        <p>Install sparecrow and run the setup wizard in under a minute.</p>
+        <a href="https://github.com/alokn/sparecrow#installation" class="btn btn-primary" rel="noopener noreferrer">Get Started</a>
+        <a href="https://github.com/alokn/sparecrow" class="btn btn-secondary" rel="noopener noreferrer">View on GitHub</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://github.com/alokn/sparecrow" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/alokn/sparecrow#installation" rel="noopener noreferrer">Installation</a>
+        <a href="https://github.com/alokn/sparecrow/blob/main/README.md" rel="noopener noreferrer">Documentation</a>
+        <a href="https://github.com/alokn/sparecrow/issues" rel="noopener noreferrer">Report an Issue</a>
+      </div>
+      <p>SpareCrow is open source under the MIT License.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
