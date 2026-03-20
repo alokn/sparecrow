@@ -46,11 +46,16 @@ function withShim(homeDir: string): Record<string, string> {
 }
 
 /**
- * Returns the state directory path for the given homeDir.
- * Always derives from homeDir — never reads process.env.XDG_STATE_HOME
- * from the Vitest runner process.
+ * Resolves the state/data directory path for the given homeDir,
+ * mirroring env-paths v4 behaviour for Linux and macOS.
+ *
+ * On macOS, env-paths maps `log` (used as data) to `~/Library/Logs/<app>`.
+ * On Linux, uses `~/.local/state/<app>`.
  */
 function getStatePath(homeDir: string): string {
+  if (process.platform === 'darwin') {
+    return join(homeDir, 'Library', 'Logs', 'sparecrow');
+  }
   return join(homeDir, '.local', 'state', 'sparecrow');
 }
 

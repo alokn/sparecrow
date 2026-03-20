@@ -1,16 +1,22 @@
 /** E2E tests for daemon lifecycle commands (suite 05). */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { runCli, seedConfig } from '../helpers/index.js';
+import { runCli, seedConfig, containerShim } from '../helpers/index.js';
 
-/** Returns env overrides that isolate the spawned binary inside homeDir. */
+/** Directory containing the node binary — must be on PATH for spawnSync('node', ...) to work. */
+const NODE_BIN_DIR = dirname(process.execPath);
+
+/** Returns env overrides that isolate the spawned binary inside homeDir,
+ *  with container shims on PATH so daemon start can detect a container runtime. */
 function baseEnv(homeDir: string): Record<string, string> {
+  const shimBin = join(homeDir, 'bin');
   return {
     HOME: homeDir,
     XDG_CONFIG_HOME: join(homeDir, '.config'),
     XDG_STATE_HOME: join(homeDir, '.local', 'state'),
+    PATH: `${shimBin}:${NODE_BIN_DIR}:/usr/bin:/bin`,
   };
 }
 
@@ -31,6 +37,7 @@ describe('daemon lifecycle (suite 05)', () => {
 
   beforeEach(async () => {
     homeDir = await mkdtemp(join(tmpdir(), 'sparecrow-dlc-'));
+    await containerShim(homeDir);
   });
 
   afterEach(async () => {

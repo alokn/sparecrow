@@ -143,7 +143,13 @@ describe('full install round-trip smoke regression (suite 11)', () => {
     expect(r3.output).toContain('Setup complete!');
 
     // Verify queue seeded with 4 tasks after onboard
-    const queuePath = join(homeDir, '.local', 'state', 'sparecrow', 'queue.json');
+    // On macOS, env-paths maps log (used as data) to ~/Library/Logs/<app>;
+    // on Linux, to ~/.local/state/<app>.
+    const stateDir =
+      process.platform === 'darwin'
+        ? join(homeDir, 'Library', 'Logs', 'sparecrow')
+        : join(homeDir, '.local', 'state', 'sparecrow');
+    const queuePath = join(stateDir, 'queue.json');
     const queueRaw = await readFile(queuePath, 'utf-8');
     const queue = JSON.parse(queueRaw) as {
       tasks: Array<{ type: string; status: string }>;

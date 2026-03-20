@@ -26,6 +26,22 @@ function baseEnv(dir: string): Record<string, string> {
   };
 }
 
+/** Resolves config dir mirroring env-paths v4 behaviour per platform. */
+function resolveConfigDir(homeDir: string): string {
+  if (process.platform === 'darwin') {
+    return join(homeDir, 'Library', 'Preferences', 'sparecrow');
+  }
+  return join(homeDir, '.config', 'sparecrow');
+}
+
+/** Resolves state/data dir mirroring env-paths v4 behaviour per platform. */
+function resolveStateDir(homeDir: string): string {
+  if (process.platform === 'darwin') {
+    return join(homeDir, 'Library', 'Logs', 'sparecrow');
+  }
+  return join(homeDir, '.local', 'state', 'sparecrow');
+}
+
 /** Returns env overrides for PTY tests with PATH prepended and TERM set. */
 function ptyEnv(dir: string): Record<string, string> {
   return {
@@ -40,7 +56,7 @@ function ptyEnv(dir: string): Record<string, string> {
  * This avoids the reconfigure prompt in fresh-onboard tests.
  */
 async function seedFreshConfig(dir: string): Promise<string> {
-  const configDir = join(dir, '.config', 'sparecrow');
+  const configDir = resolveConfigDir(dir);
   const configPath = join(configDir, 'config.yaml');
   await mkdir(configDir, { recursive: true });
   const minimal = {
@@ -100,7 +116,7 @@ describe('onboard interactive (suite 09)', () => {
     // Restore permissions for AC9 before cleanup.
     // ENOENT is expected (directory never created in tests that exit early) — ignore it.
     // Re-throw unexpected errors so cleanup failures are visible in the test runner output.
-    await chmod(join(homeDir, '.config', 'sparecrow'), 0o755).catch((err: unknown) => {
+    await chmod(resolveConfigDir(homeDir), 0o755).catch((err: unknown) => {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw err;
       }
@@ -109,7 +125,7 @@ describe('onboard interactive (suite 09)', () => {
     // Poll for the daemon to exit (up to 3s) rather than using a fixed 300ms wait,
     // to avoid ENOTEMPTY failures when the daemon still has open file handles.
     try {
-      const pidPath = join(homeDir, '.local', 'state', 'sparecrow', 'daemon.pid');
+      const pidPath = join(resolveStateDir(homeDir), 'daemon.pid');
       const pidContent = await readFile(pidPath, 'utf-8').catch(() => '');
       const pid = parseInt(pidContent.trim(), 10);
       if (Number.isFinite(pid) && pid > 0) {
@@ -197,12 +213,12 @@ describe('onboard interactive (suite 09)', () => {
     expect(result.output).toContain('Setup complete!');
 
     // Config file exists and contains trigger
-    const configPath = join(homeDir, '.config', 'sparecrow', 'config.yaml');
+    const configPath = join(resolveConfigDir(homeDir), 'config.yaml');
     const configContent = await readFile(configPath, 'utf-8');
     expect(configContent).toContain('trigger');
 
     // Queue file should NOT exist (zero templates selected)
-    const queuePath = join(homeDir, '.local', 'state', 'sparecrow', 'queue.json');
+    const queuePath = join(resolveStateDir(homeDir), 'queue.json');
     const queueExists = await stat(queuePath).then(
       () => true,
       () => false,
@@ -247,7 +263,7 @@ describe('onboard interactive (suite 09)', () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain('Setup complete!');
 
-    const queuePath = join(homeDir, '.local', 'state', 'sparecrow', 'queue.json');
+    const queuePath = join(resolveStateDir(homeDir), 'queue.json');
     const queueContent = await readFile(queuePath, 'utf-8');
     const parsed = JSON.parse(queueContent) as {
       tasks: Array<{
@@ -285,7 +301,7 @@ describe('onboard interactive (suite 09)', () => {
     // for the '--daemon-runner' flag. Since process.ppid points to a non-daemon process,
     // it returns 'stale', the stale PID gets cleaned up, and startDaemon() proceeds normally.
     // The afterEach block handles cleanup of any spawned daemon process.
-    const stateDir = join(homeDir, '.local', 'state', 'sparecrow');
+    const stateDir = resolveStateDir(homeDir);
     await mkdir(stateDir, { recursive: true });
 
     const result = await runPty(['onboard', '--install-daemon'], {
@@ -364,7 +380,7 @@ describe('onboard interactive (suite 09)', () => {
     expect(result.output).toContain('Setup complete!');
 
     // Config file still exists
-    const configPath = join(homeDir, '.config', 'sparecrow', 'config.yaml');
+    const configPath = join(resolveConfigDir(homeDir), 'config.yaml');
     const configExists = await stat(configPath).then(
       () => true,
       () => false,
@@ -380,7 +396,7 @@ describe('onboard interactive (suite 09)', () => {
       provider: { claude_path: join(homeDir, 'bin', 'claude') },
     });
 
-    const configPath = join(homeDir, '.config', 'sparecrow', 'config.yaml');
+    const configPath = join(resolveConfigDir(homeDir), 'config.yaml');
     const before = await readFile(configPath, 'utf-8');
 
     // Install claude shim (needed for PATH in env, even if not invoked)
@@ -425,7 +441,7 @@ describe('onboard interactive (suite 09)', () => {
     expect(result.output).toContain('Setup cancelled.');
 
     // Config should not have trigger/provider from the wizard
-    const configPath = join(homeDir, '.config', 'sparecrow', 'config.yaml');
+    const configPath = join(resolveConfigDir(homeDir), 'config.yaml');
     const configContent = await readFile(configPath, 'utf-8');
     // seedFreshConfig has no trigger/provider — verify wizard didn't write them
     expect(configContent).not.toContain('max_waste_percentage');
@@ -451,7 +467,7 @@ describe('onboard interactive (suite 09)', () => {
     execSync('git init', { cwd: join(homeDir, 'repo'), stdio: 'ignore' });
 
     // Make config directory non-writable to cause apply failure
-    await chmod(join(homeDir, '.config', 'sparecrow'), 0o555);
+    await chmod(resolveConfigDir(homeDir), 0o555);
 
     const result = await runPty(['onboard'], {
       env: ptyEnv(homeDir),
@@ -472,7 +488,7 @@ describe('onboard interactive (suite 09)', () => {
     });
 
     // Restore permissions before assertions so afterEach cleanup works
-    await chmod(join(homeDir, '.config', 'sparecrow'), 0o755);
+    await chmod(resolveConfigDir(homeDir), 0o755);
 
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain('Setup failed');

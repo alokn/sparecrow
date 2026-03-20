@@ -57,7 +57,7 @@ export function renderTable(
   const table = new Table({
     head: ['#', 'Name', 'Status', 'Type', 'Timeout', 'Target'],
     style: { head: [], border: [] },
-    colWidths: [null, null, null, null, null, 40],
+    colWidths: [null, null, null, null, null, null],
   });
   for (const task of tasks) {
     table.push([
@@ -101,7 +101,7 @@ export function renderLiveTable(
     const table = new Table({
       head: ['', 'Name', 'Status', 'Type', 'Timeout', 'Target'],
       style: { head: [], border: [] },
-      colWidths: [null, null, null, null, null, 40],
+      colWidths: [null, null, null, null, null, null],
     });
     for (const task of running) {
       table.push([
@@ -127,7 +127,7 @@ export function renderLiveTable(
     const table = new Table({
       head: ['#', 'Name', 'Status', 'Type', 'Timeout', 'Target'],
       style: { head: [], border: [] },
-      colWidths: [null, null, null, null, null, 40],
+      colWidths: [null, null, null, null, null, null],
     });
     for (let i = 0; i < sorted.length; i++) {
       const task = sorted[i]!;
@@ -188,7 +188,7 @@ export function renderHistoryTable(
   const table = new Table({
     head: ['', 'Name', 'Status', 'Type', 'Completed', 'Target'],
     style: { head: [], border: [] },
-    colWidths: [null, null, null, null, null, 40],
+    colWidths: [null, null, null, null, null, null],
   });
 
   for (const task of sorted) {

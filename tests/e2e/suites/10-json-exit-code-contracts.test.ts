@@ -299,7 +299,12 @@ describe('JSON envelope and exit code contracts (suite 10)', () => {
     beforeEach(async () => {
       homeDir2 = await mkdtemp(join(tmpdir(), 'sparecrow-badconfig-'));
       // Seed an invalid config to trigger CONFIG_INVALID (exit code 3)
-      const configDir = join(homeDir2, '.config', 'sparecrow');
+      // On macOS, env-paths resolves config to ~/Library/Preferences/<app>;
+      // on Linux, to ~/.config/<app>.
+      const configDir =
+        process.platform === 'darwin'
+          ? join(homeDir2, 'Library', 'Preferences', 'sparecrow')
+          : join(homeDir2, '.config', 'sparecrow');
       await mkdir(configDir, { recursive: true });
       await writeFile(join(configDir, 'config.yaml'), 'polling_interval: notanumber\n');
     });
