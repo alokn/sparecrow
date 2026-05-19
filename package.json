@@ -52,7 +52,7 @@
   },
   "homepage": "https://github.com/alokn/sparecrow#readme",
   "devDependencies": {
-    "@j178/prek": "^0.3.3",
+    "@j178/prek": "^0.4.0",
     "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.0.18",
     "marked-man": "^2.1.0",
